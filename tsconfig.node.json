@@ -22,5 +22,12 @@
     "src/shared/**/*",
     "tests/**/*"
   ],
-  "exclude": ["tests/unit/views.test.ts", "tests/unit/sidebar.test.ts", "tests/unit/theme.test.ts"]
+  "exclude": [
+    "tests/unit/views.test.ts",
+    "tests/unit/sidebar.test.ts",
+    "tests/unit/theme.test.ts",
+    "tests/unit/calendar-view.test.ts",
+    "tests/unit/plaza-view.test.ts",
+    "tests/unit/assets-view.test.ts"
+  ]
 }

@@ -11,7 +11,7 @@ import SettingsView from '../../src/renderer/src/views/SettingsView.vue'
 
 const settings = {
   userName: '',
-  dataPath: 'D:/data/workhelper.db',
+  dataPath: 'D:/data/workbench.db',
   version: '1.0.0',
   sidebar: [] as string[],
   theme: DEFAULT_THEME
@@ -29,8 +29,7 @@ const apiMock = {
     importBackup: vi.fn(async () => null),
     openDataDir: vi.fn(async () => undefined),
     openExternal: vi.fn(async () => undefined)
-  },
-  modules: { list: vi.fn(async () => []) }
+  }
 }
 
 beforeEach(() => {

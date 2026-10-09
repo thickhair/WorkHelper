@@ -7,11 +7,10 @@ import { readFileSync, writeFileSync } from 'fs'
 import { getDataDir, getDb, getDbDriver, getDbPath } from '../db/database'
 import { DEFAULT_SIDEBAR, normalizeSidebar } from '@shared/features'
 import { normalizeTheme } from '@shared/themes'
-import type { AppSettings, BackupPayload, FocusOverview } from '@shared/types'
+import type { AppSettings, BackupPayload } from '@shared/types'
 
 /** 备份涉及的表与列定义（按外键依赖顺序排列） */
 const BACKUP_TABLES: Record<string, string[]> = {
-  modules: ['key', 'name', 'icon', 'goal', 'sort_order'],
   habits: ['id', 'name', 'icon', 'target', 'sort_order', 'archived'],
   habit_logs: ['id', 'habit_id', 'date', 'count'],
   schedules: ['id', 'date', 'time', 'title', 'description', 'done', 'sort_order', 'created_at'],
@@ -27,11 +26,14 @@ const BACKUP_TABLES: Record<string, string[]> = {
     'sort_order',
     'created_at'
   ],
-  module_records: ['id', 'module_key', 'date', 'title', 'duration', 'note', 'created_at'],
-  module_notes: ['id', 'module_key', 'title', 'content', 'created_at', 'updated_at'],
-  news: ['id', 'title', 'source', 'url', 'summary', 'tags', 'favorite', 'created_at'],
-  reviews: ['id', 'date', 'done_text', 'problem_text', 'plan_text', 'mood', 'created_at', 'updated_at'],
   focus_logs: ['id', 'date', 'title', 'minutes', 'created_at'],
+  birthdays: ['id', 'name', 'calendar', 'month', 'day', 'remind_days', 'note', 'created_at'],
+  moods: ['date', 'mood', 'updated_at'],
+  anniversaries: ['id', 'name', 'kind', 'year', 'month', 'day', 'note', 'created_at'],
+  asset_accounts: ['id', 'platform', 'name', 'balance', 'note', 'sort_order', 'created_at', 'updated_at'],
+  asset_records: ['id', 'account_id', 'kind', 'category', 'amount', 'date', 'note', 'created_at'],
+  saving_goals: ['id', 'kind', 'name', 'target', 'period', 'per_amount', 'start_date', 'note', 'done', 'created_at'],
+  saving_deposits: ['id', 'goal_id', 'amount', 'date', 'note', 'created_at'],
   settings: ['key', 'value']
 }
 
@@ -118,7 +120,7 @@ export const settingsService = {
     const db = getDb()
     const result = await dialog.showSaveDialog({
       title: '导出数据备份',
-      defaultPath: `WorkHelper-备份-${new Date().toISOString().slice(0, 10)}.json`,
+      defaultPath: `Workbench-备份-${new Date().toISOString().slice(0, 10)}.json`,
       filters: [{ name: 'JSON 备份文件', extensions: ['json'] }]
     })
     if (result.canceled || !result.filePath) return null
@@ -128,7 +130,7 @@ export const settingsService = {
       tables[table] = db.prepare(`SELECT ${columns.join(', ')} FROM ${table}`).all()
     })
     const payload: BackupPayload = {
-      app: 'WorkHelper',
+      app: 'Workbench',
       version: app.getVersion(),
       exportedAt: new Date().toISOString(),
       tables,
@@ -148,7 +150,7 @@ export const settingsService = {
     if (result.canceled || result.filePaths.length === 0) return null
 
     const raw = JSON.parse(readFileSync(result.filePaths[0], 'utf-8')) as BackupPayload
-    if (raw.app !== 'WorkHelper' || !raw.tables) {
+    if (raw.app !== 'Workbench' || !raw.tables) {
       throw new Error('备份文件格式不正确，无法恢复')
     }
 
@@ -189,7 +191,7 @@ export const settingsService = {
   }
 }
 
-/** 专注计时记录服务 */
+/** 专注计时记录服务（供每日计划页的专注计时落库） */
 export const focusService = {
   create(payload: { date: string; title: string; minutes: number }): void {
     getDb()
@@ -202,24 +204,5 @@ export const focusService = {
       .prepare('SELECT COALESCE(SUM(minutes), 0) AS m FROM focus_logs WHERE date = ?')
       .get(date) as { m: number }
     return Number(row.m ?? 0)
-  },
-
-  /** 专注空间概览：指定日期的总专注时长 + 最近专注记录 */
-  overview(date: string, limit = 20): FocusOverview {
-    const rows = getDb()
-      .prepare(
-        'SELECT id, date, title, minutes, created_at FROM focus_logs ORDER BY id DESC LIMIT ?'
-      )
-      .all(Math.max(1, Math.round(limit))) as Array<Record<string, unknown>>
-    return {
-      todayMinutes: this.todayMinutes(date),
-      recent: rows.map((row) => ({
-        id: Number(row.id),
-        date: String(row.date),
-        title: String(row.title ?? ''),
-        minutes: Number(row.minutes ?? 0),
-        createdAt: String(row.created_at ?? '')
-      }))
-    }
   }
 }

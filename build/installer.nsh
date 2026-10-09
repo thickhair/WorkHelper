@@ -1,5 +1,5 @@
 ; ============================================================================
-; WorkHelper 安装包自定义脚本（electron-builder 自定义 include）
+; Workbench 安装包自定义脚本（electron-builder 自定义 include）
 ; 该文件由 electron-builder 在生成安装脚本时引入到脚本前部，
 ; 因此此处定义的宏、变量与函数在安装 / 卸载流程中全局生效。
 ; ============================================================================
@@ -10,13 +10,13 @@
 !include "nsDialogs.nsh"
 
 ; 自动创建的安装子文件夹名（与打包应用名保持一致）
-!define APP_SUBFOLDER "WorkHelper"
+!define APP_SUBFOLDER "Workbench"
 
 Var WHELPER_VERIFYING
 
 ; ----------------------------------------------------------------------------
 ; 目录页回调：用户选择或输入安装目录后，自动追加以软件名命名的子文件夹，
-; 并把最终路径同步显示到「目标文件夹」输入框（如 D:\app → D:\app\WorkHelper）。
+; 并把最终路径同步显示到「目标文件夹」输入框（如 D:\app → D:\app\Workbench）。
 ; ----------------------------------------------------------------------------
 Function .onVerifyInstDir
   ; 防重入：同步输入框文本会再次触发本回调
@@ -35,7 +35,7 @@ Function .onVerifyInstDir
     StrCpy $INSTDIR $INSTDIR -1
   verify_trimmed:
 
-  ; 已以 \WorkHelper 结尾时保持不变（避免重复追加）
+  ; 已以 \Workbench 结尾时保持不变（避免重复追加）
   StrLen $1 "\${APP_SUBFOLDER}"
   StrCpy $0 $INSTDIR $1 -$1
   StrCmp $0 "\${APP_SUBFOLDER}" verify_store
@@ -69,7 +69,7 @@ FunctionEnd
 ; ----------------------------------------------------------------------------
 !ifndef BUILD_UNINSTALLER
   !ifndef INSTALL_MODE_PER_ALL_USERS
-    !define MUI_PAGE_CUSTOMFUNCTION_SHOW WorkHelperInstallModePageShow
+    !define MUI_PAGE_CUSTOMFUNCTION_SHOW WorkbenchInstallModePageShow
   !endif
 !endif
 
@@ -90,15 +90,15 @@ FunctionEnd
       Var WHELPER_NEXT_BTN_WIDENED
 
       ; 单选按钮点击包装：先转发原有逻辑（叠加/移除盾牌、刷新说明文字），再校正宽度
-      Function WorkHelperInstModeChange
+      Function WorkbenchInstModeChange
         Pop $0
         Push $0
         Call InstModeChange
-        Call WorkHelperSyncNextButtonWidth
+        Call WorkbenchSyncNextButtonWidth
       FunctionEnd
 
       ; 依据单选状态校正「下一步」按钮宽度：仅选中「所有用户」（按钮显示盾牌）时加宽
-      Function WorkHelperSyncNextButtonWidth
+      Function WorkbenchSyncNextButtonWidth
         ; System::Store "S"~"L"：保存/恢复 System 插件寄存器并管理其缓冲区
         System::Store "S"
         Push $0
@@ -145,13 +145,13 @@ FunctionEnd
       FunctionEnd
 
       ; 安装选项页显示时的处理：把单选按钮回调换成包装函数，并按当前选择校正宽度
-      Function WorkHelperInstallModePageShow
+      Function WorkbenchInstallModePageShow
         ; 只有存在两个安装选项时页面才绑定过单选按钮回调（见 multiUserUi.nsh）
         StrCmp $HasTwoAvailableOptions "1" 0 wh_show_sync
-        ${NSD_OnClick} $MultiUser.InstallModePage.AllUsers WorkHelperInstModeChange
-        ${NSD_OnClick} $MultiUser.InstallModePage.CurrentUser WorkHelperInstModeChange
+        ${NSD_OnClick} $MultiUser.InstallModePage.AllUsers WorkbenchInstModeChange
+        ${NSD_OnClick} $MultiUser.InstallModePage.CurrentUser WorkbenchInstModeChange
         wh_show_sync:
-        Call WorkHelperSyncNextButtonWidth
+        Call WorkbenchSyncNextButtonWidth
       FunctionEnd
     !endif
   !endif

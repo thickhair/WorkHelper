@@ -4,6 +4,7 @@
  * 习惯打卡、重要事项与下一个任务（参照设计稿布局）。
  */
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import type { Habit, PriorityTask, Schedule, Todo } from '@shared/types'
 import {
   addDays,
@@ -26,6 +27,7 @@ import TaskEditDialog, { TaskFormValue } from '../components/TaskEditDialog.vue'
 
 const store = usePlanStore()
 const toast = useToastStore()
+const router = useRouter()
 
 const today = formatDate(new Date())
 
@@ -277,7 +279,7 @@ function timeRange(start: string, end: string): string {
         </div>
       </div>
       <div class="date-nav">
-        <span class="date-chip">
+        <span class="date-chip clickable" title="打开日历" @click="router.push('/calendar')">
           <Icon name="calendar" :size="13" />{{ dateLabel }}
         </span>
         <button class="icon-btn" title="前一天" @click="shiftDay(-1)">
@@ -707,6 +709,16 @@ function timeRange(start: string, end: string): string {
   font-weight: 600;
   color: var(--text-1);
   margin-right: 4px;
+}
+
+.date-chip.clickable {
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.date-chip.clickable:hover {
+  background: var(--green-100);
+  color: var(--green-700);
 }
 
 .date-chip .icon {

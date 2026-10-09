@@ -9,8 +9,8 @@ const fs = require('fs')
 const Database = require('better-sqlite3')
 
 const dbRoot =
-  process.env.WORKHELPER_DATA_DIR || path.join(os.homedir(), 'AppData', 'Roaming', 'WorkHelper')
-const dbPath = path.join(dbRoot, 'data', 'workhelper.db')
+  process.env.WORKBENCH_DATA_DIR || path.join(os.homedir(), 'AppData', 'Roaming', 'Workbench')
+const dbPath = path.join(dbRoot, 'data', 'workbench.db')
 if (!fs.existsSync(dbPath)) {
   console.error('数据库不存在，请先启动一次应用：', dbPath)
   process.exit(1)

@@ -68,6 +68,16 @@ export const scheduleService = {
     return rows.map(mapSchedule)
   },
 
+  /** 指定日期区间（含首尾）内的全部日程，供日历月视图使用 */
+  listRange(from: string, to: string): Schedule[] {
+    const rows = getDb()
+      .prepare(
+        'SELECT * FROM schedules WHERE date >= ? AND date <= ? ORDER BY date ASC, time ASC, id ASC'
+      )
+      .all(from, to)
+    return rows.map(mapSchedule)
+  },
+
   create(input: ScheduleInput): Schedule {
     const db = getDb()
     const maxRow = db

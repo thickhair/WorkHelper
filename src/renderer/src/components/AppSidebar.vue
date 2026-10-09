@@ -1,6 +1,8 @@
 <script setup lang="ts">
 /**
- * 左侧导航栏：Logo + 功能广场配置的功能入口（可悬停移除），当前路由高亮。
+ * 左侧导航栏：Logo + 导航入口，当前路由高亮。
+ * 首页 / 每日计划 / 日历 / 功能广场为固定项（始终显示、不可移除），
+ * 其余功能由「功能广场」配置，悬停显示移除按钮。
  */
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -20,7 +22,7 @@ function isActive(path: string): boolean {
   return route.path === path
 }
 
-/** 从侧边栏移除功能（可从「功能广场」重新添加） */
+/** 从侧边栏移除功能（仅可配置功能；可从「功能广场」重新添加） */
 async function removeItem(id: string, name: string, path: string): Promise<void> {
   try {
     await sidebar.remove(id)
@@ -29,11 +31,6 @@ async function removeItem(id: string, name: string, path: string): Promise<void>
   } catch (err) {
     toast.error((err as Error).message)
   }
-}
-
-/** 打开功能广场（侧边栏未包含「功能广场」时的常驻入口） */
-async function openPlaza(): Promise<void> {
-  await router.push('/plaza')
 }
 </script>
 
@@ -45,7 +42,7 @@ async function openPlaza(): Promise<void> {
       </span>
       <div class="logo-text">
         <span class="logo-title">我的工作台</span>
-        <span class="logo-sub">WorkHelper</span>
+        <span class="logo-sub">Workbench</span>
       </div>
     </div>
 
@@ -61,6 +58,7 @@ async function openPlaza(): Promise<void> {
         <Icon :name="item.icon" :size="15" />
         <span class="menu-title">{{ item.name }}</span>
         <button
+          v-if="!item.fixed"
           class="remove-btn"
           title="从侧边栏移除"
           @click.prevent.stop="removeItem(item.id, item.name, item.route)"
@@ -71,15 +69,6 @@ async function openPlaza(): Promise<void> {
     </nav>
 
     <div class="sidebar-foot">
-      <button
-        v-if="!sidebar.isEnabled('plaza')"
-        class="foot-add"
-        title="功能广场：添加或移除侧边栏功能"
-        @click="openPlaza"
-      >
-        <Icon name="plus" :size="11" />
-        <span class="foot-add-text">添加功能</span>
-      </button>
       <span class="foot-text">V1.0 · 数据本地存储</span>
     </div>
   </aside>
@@ -219,28 +208,6 @@ async function openPlaza(): Promise<void> {
   gap: 8px;
 }
 
-/* 侧边栏未包含「功能广场」时的常驻入口 */
-.foot-add {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 10px;
-  border: none;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.16);
-  color: rgba(255, 255, 255, 0.92);
-  font-size: 11.5px;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-}
-
-.foot-add:hover {
-  background: rgba(255, 255, 255, 0.3);
-  color: #fff;
-}
-
 .foot-text {
   font-size: 10px;
   color: rgba(255, 255, 255, 0.55);
@@ -255,7 +222,6 @@ async function openPlaza(): Promise<void> {
   .logo-text,
   .menu-title,
   .remove-btn,
-  .foot-add-text,
   .foot-text {
     display: none;
   }
@@ -272,12 +238,6 @@ async function openPlaza(): Promise<void> {
   .sidebar-foot {
     padding: 8px 0 10px;
     align-items: center;
-  }
-
-  .foot-add {
-    width: 28px;
-    height: 28px;
-    padding: 0;
   }
 }
 </style>

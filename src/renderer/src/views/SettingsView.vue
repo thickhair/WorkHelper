@@ -3,6 +3,7 @@
  * 设置页：外观主题、用户昵称、数据备份与恢复、数据目录、关于信息。
  */
 import { onMounted, ref } from 'vue'
+import type { StorageInfo } from '@shared/types'
 import type { ThemeDef } from '@shared/themes'
 import { useAppStore } from '../stores/app'
 import { useThemeStore } from '../stores/theme'
@@ -18,6 +19,8 @@ const nameDraft = ref('')
 const driver = ref('')
 const busy = ref(false)
 const restoreConfirmVisible = ref(false)
+const storageConfirmVisible = ref(false)
+const storageInfo = ref<StorageInfo | null>(null)
 
 onMounted(async () => {
   if (!appStore.ready) await appStore.init()
@@ -34,7 +37,35 @@ onMounted(async () => {
   } catch {
     driver.value = '未知'
   }
+  await loadStorageInfo()
 })
+
+/** 读取数据存储位置信息 */
+async function loadStorageInfo(): Promise<void> {
+  try {
+    storageInfo.value = await window.api.app.storageInfo()
+  } catch {
+    storageInfo.value = null
+  }
+}
+
+/** 更改数据存储位置：二次确认后由主进程弹出文件夹选择并迁移数据 */
+async function changeStorage(): Promise<void> {
+  storageConfirmVisible.value = false
+  busy.value = true
+  try {
+    const path = await window.api.app.changeStorage()
+    if (path) {
+      await loadStorageInfo()
+      await appStore.init()
+      toast.success('数据存储位置已更改（原位置文件保留）')
+    }
+  } catch (err) {
+    toast.error((err as Error).message)
+  } finally {
+    busy.value = false
+  }
+}
 
 /** 切换主题：立即生效并保存 */
 async function pickTheme(theme: ThemeDef): Promise<void> {
@@ -182,10 +213,36 @@ async function openDataDir(): Promise<void> {
       <div class="setting-row">
         <div class="sr-text">
           <span class="sr-title">打开数据目录</span>
-          <span class="sr-desc">查看本机数据库文件 workhelper.db</span>
+          <span class="sr-desc">查看本机数据库文件 workbench.db</span>
         </div>
         <button class="btn btn-plain btn-sm" @click="openDataDir">
           <Icon name="folder" :size="13" />打开目录
+        </button>
+      </div>
+
+      <div class="setting-row">
+        <div class="sr-text">
+          <span class="sr-title title-line">
+            数据存储位置
+            <span v-if="storageInfo?.custom" class="tag tag-blue">自定义</span>
+          </span>
+          <span class="sr-desc path-line">
+            {{ storageInfo?.dataPath ?? appStore.settings?.dataPath ?? '读取中…' }}
+          </span>
+          <span class="sr-desc">
+            {{
+              storageInfo?.portable
+                ? '便携模式下由启动参数固定，无法在应用内更改'
+                : '更改后会把数据库复制到所选文件夹，原位置文件保留'
+            }}
+          </span>
+        </div>
+        <button
+          class="btn btn-ghost btn-sm"
+          :disabled="busy || storageInfo?.portable === true"
+          @click="storageConfirmVisible = true"
+        >
+          <Icon name="folder" :size="13" />更改位置
         </button>
       </div>
     </section>
@@ -198,7 +255,7 @@ async function openDataDir(): Promise<void> {
       <div class="about-grid">
         <div class="about-item">
           <span class="about-label">应用名称</span>
-          <span class="about-value">个人工作台 WorkHelper</span>
+          <span class="about-value">个人工作台 Workbench</span>
         </div>
         <div class="about-item">
           <span class="about-label">版本</span>
@@ -226,6 +283,16 @@ async function openDataDir(): Promise<void> {
       confirm-text="继续导入"
       @close="restoreConfirmVisible = false"
       @confirm="importBackup"
+    />
+
+    <ConfirmDialog
+      :visible="storageConfirmVisible"
+      title="更改数据存储位置"
+      message="接下来会打开文件夹选择窗口，并把当前数据库复制到所选文件夹下的 Workbench 目录，随后立即切换使用新位置（原位置文件保留）。确定继续吗？"
+      confirm-text="选择文件夹"
+      confirm-tone="primary"
+      @close="storageConfirmVisible = false"
+      @confirm="changeStorage"
     />
   </div>
 </template>
@@ -364,9 +431,23 @@ async function openDataDir(): Promise<void> {
   font-weight: 700;
 }
 
+.title-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .sr-desc {
   font-size: 11.5px;
   color: var(--text-3);
+}
+
+.path-line {
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 11px;
+  color: var(--text-2);
+  word-break: break-all;
+  user-select: text;
 }
 
 .sr-control {

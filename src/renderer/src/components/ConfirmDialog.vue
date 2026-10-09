@@ -11,8 +11,10 @@ withDefaults(
     title?: string
     message: string
     confirmText?: string
+    /** 确认按钮色调：danger 红色（默认，用于删除类操作）/ primary 主题色 */
+    confirmTone?: 'danger' | 'primary'
   }>(),
-  { title: '操作确认', confirmText: '确认删除' }
+  { title: '操作确认', confirmText: '确认删除', confirmTone: 'danger' }
 )
 
 const emit = defineEmits<{
@@ -29,7 +31,9 @@ const emit = defineEmits<{
     </p>
     <template #footer>
       <button class="btn btn-plain" @click="emit('close')">取消</button>
-      <button class="btn btn-danger" @click="emit('confirm')">{{ confirmText }}</button>
+      <button class="btn" :class="confirmTone === 'primary' ? 'btn-primary' : 'btn-danger'" @click="emit('confirm')">
+        {{ confirmText }}
+      </button>
     </template>
   </ModalDialog>
 </template>

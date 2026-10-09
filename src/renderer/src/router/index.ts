@@ -19,40 +19,22 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '每日计划', icon: 'calendar' }
   },
   {
-    path: '/m/:key',
-    name: 'module',
-    component: () => import('../views/ModuleView.vue'),
-    meta: { title: '模块', icon: 'book' }
+    path: '/calendar',
+    name: 'calendar',
+    component: () => import('../views/CalendarView.vue'),
+    meta: { title: '日历', icon: 'calendarDays' }
   },
   {
-    path: '/focus',
-    name: 'focus',
-    component: () => import('../views/FocusView.vue'),
-    meta: { title: '专注空间', icon: 'target' }
+    path: '/assets',
+    name: 'assets',
+    component: () => import('../views/AssetsView.vue'),
+    meta: { title: '资产', icon: 'wallet' }
   },
   {
     path: '/plaza',
     name: 'plaza',
     component: () => import('../views/PlazaView.vue'),
     meta: { title: '功能广场', icon: 'grid' }
-  },
-  {
-    path: '/news',
-    name: 'news',
-    component: () => import('../views/NewsView.vue'),
-    meta: { title: '新闻资讯', icon: 'news' }
-  },
-  {
-    path: '/review',
-    name: 'review',
-    component: () => import('../views/ReviewView.vue'),
-    meta: { title: '工作复盘', icon: 'notebook' }
-  },
-  {
-    path: '/stats',
-    name: 'stats',
-    component: () => import('../views/StatsView.vue'),
-    meta: { title: '数据统计', icon: 'chart' }
   },
   {
     path: '/settings',
@@ -68,8 +50,9 @@ const router = createRouter({
   routes
 })
 
-// 已从侧边栏移除的功能不可直接访问（「功能广场」作为功能总入口始终可访问），
-// 统一跳转到侧边栏中的第一个功能；侧边栏为空时跳到功能广场，便于重新添加
+// 固定功能（首页 / 每日计划 / 日历 / 功能广场）始终可访问（isEnabled 恒为 true），
+// 「设置」不在功能目录中，经右上角入口访问（featureByRoute 返回 undefined 直接放行），
+// 已从侧边栏移除的可配置功能不可直接访问，统一跳转到侧边栏中的第一个功能（首页）
 router.beforeEach(async (to) => {
   const sidebar = useSidebarStore()
   if (!sidebar.ready) {
@@ -80,9 +63,8 @@ router.beforeEach(async (to) => {
     }
   }
   const feature = featureByRoute(to.path)
-  if (!feature || feature.id === 'plaza') return true
-  if (sidebar.isEnabled(feature.id)) return true
-  const fallback = sidebar.items[0]?.route ?? '/plaza'
+  if (!feature || sidebar.isEnabled(feature.id)) return true
+  const fallback = sidebar.items[0]?.route ?? '/'
   if (fallback === to.path) return true
   return { path: fallback }
 })

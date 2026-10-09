@@ -3,31 +3,36 @@
  * 渲染进程开启 contextIsolation 且禁用 nodeIntegration，只能调用此处暴露的方法。
  */
 import { contextBridge, ipcRenderer } from 'electron'
+import type { Anniversary, AnniversaryInput } from '../shared/anniversaries'
 import type {
   AppSettings,
+  AssetAccount,
+  AssetAccountInput,
+  AssetCategoryStat,
+  AssetRecordInput,
+  AssetRecordWithAccount,
+  AssetsSummary,
+  AssetTrendPoint,
+  Birthday,
+  BirthdayInput,
   DayStats,
-  FocusOverview,
   Habit,
   HabitInput,
   HabitWithProgress,
-  ModuleInfo,
-  ModuleNote,
-  ModuleNoteInput,
-  ModuleRecord,
-  ModuleRecordInput,
-  NewsInput,
-  NewsItem,
+  MoodRecord,
   PriorityInput,
   PriorityTask,
-  Review,
-  ReviewInput,
+  SavingDeposit,
+  SavingGoalInput,
+  SavingGoalWithProgress,
   Schedule,
   ScheduleInput,
-  StatsOverview,
+  StorageInfo,
   Todo,
   TodoInput,
   TrendPoint
 } from '../shared/types'
+import type { WeatherResult } from '../shared/weather'
 
 /** 统一调用封装：主进程返回 { ok, data, error }，此处解包并抛出友好错误 */
 async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
@@ -63,12 +68,15 @@ const api = {
     exportBackup: (): Promise<string | null> => invoke('app:export-backup'),
     importBackup: (): Promise<string | null> => invoke('app:import-backup'),
     openDataDir: (): Promise<void> => invoke('app:open-data-dir'),
-    openExternal: (url: string): Promise<void> => invoke('app:open-external', url)
+    openExternal: (url: string): Promise<void> => invoke('app:open-external', url),
+    storageInfo: (): Promise<StorageInfo> => invoke('app:storage-info'),
+    changeStorage: (): Promise<string | null> => invoke('app:change-storage')
   },
 
   /** 日程 */
   schedules: {
     list: (date: string): Promise<Schedule[]> => invoke('schedules:list', date),
+    range: (from: string, to: string): Promise<Schedule[]> => invoke('schedules:range', from, to),
     create: (input: ScheduleInput): Promise<Schedule> => invoke('schedules:create', input),
     update: (id: number, patch: Partial<ScheduleInput>): Promise<Schedule> =>
       invoke('schedules:update', id, patch),
@@ -108,64 +116,79 @@ const api = {
       invoke('habits:check-in', id, date, delta)
   },
 
-  /** 分类模块 */
-  modules: {
-    list: (): Promise<ModuleInfo[]> => invoke('modules:list'),
-    updateGoal: (key: string, goal: string): Promise<ModuleInfo> =>
-      invoke('modules:update-goal', key, goal),
-    records: (moduleKey: string): Promise<ModuleRecord[]> => invoke('modules:records', moduleKey),
-    createRecord: (input: ModuleRecordInput): Promise<ModuleRecord> =>
-      invoke('modules:create-record', input),
-    updateRecord: (id: number, patch: Partial<ModuleRecordInput>): Promise<ModuleRecord> =>
-      invoke('modules:update-record', id, patch),
-    removeRecord: (id: number): Promise<void> => invoke('modules:remove-record', id),
-    summary: (
-      moduleKey: string
-    ): Promise<{ records: number; minutes: number; lastDate: string }> =>
-      invoke('modules:summary', moduleKey),
-    notes: (moduleKey: string): Promise<ModuleNote[]> => invoke('modules:notes', moduleKey),
-    createNote: (input: ModuleNoteInput): Promise<ModuleNote> =>
-      invoke('modules:create-note', input),
-    updateNote: (id: number, patch: Partial<ModuleNoteInput>): Promise<ModuleNote> =>
-      invoke('modules:update-note', id, patch),
-    removeNote: (id: number): Promise<void> => invoke('modules:remove-note', id)
-  },
-
-  /** 新闻资讯 */
-  news: {
-    list: (keyword?: string, favoriteOnly?: boolean): Promise<NewsItem[]> =>
-      invoke('news:list', keyword ?? '', favoriteOnly ?? false),
-    create: (input: NewsInput): Promise<NewsItem> => invoke('news:create', input),
-    update: (id: number, patch: Partial<NewsInput>): Promise<NewsItem> =>
-      invoke('news:update', id, patch),
-    toggleFavorite: (id: number): Promise<NewsItem> => invoke('news:toggle-favorite', id),
-    remove: (id: number): Promise<void> => invoke('news:remove', id)
-  },
-
-  /** 工作复盘 */
-  reviews: {
-    list: (): Promise<Review[]> => invoke('reviews:list'),
-    get: (date: string): Promise<Review | null> => invoke('reviews:get', date),
-    save: (input: ReviewInput): Promise<Review> => invoke('reviews:save', input),
-    remove: (date: string): Promise<void> => invoke('reviews:remove', date)
-  },
-
-  /** 数据统计 */
+  /** 数据统计（首页与每日计划页） */
   stats: {
     day: (date: string): Promise<DayStats> => invoke('stats:day', date),
-    trend: (days?: number): Promise<TrendPoint[]> => invoke('stats:trend', days ?? 7),
-    overview: (days?: number): Promise<StatsOverview> => invoke('stats:overview', days ?? 7)
+    trend: (days?: number): Promise<TrendPoint[]> => invoke('stats:trend', days ?? 7)
   },
 
-  /** 专注计时记录 */
+  /** 专注计时记录（每日计划页专注计时落库） */
   focus: {
     create: (payload: { date: string; title: string; minutes: number }): Promise<void> =>
-      invoke('focus:create', payload),
-    overview: (date: string, limit?: number): Promise<FocusOverview> =>
-      invoke('focus:overview', date, limit ?? 20)
+      invoke('focus:create', payload)
+  },
+
+  /** 生日（支持公历 / 农历与提前提醒） */
+  birthdays: {
+    list: (): Promise<Birthday[]> => invoke('birthdays:list'),
+    save: (input: BirthdayInput): Promise<Birthday> => invoke('birthdays:save', input),
+    remove: (id: number): Promise<void> => invoke('birthdays:remove', id)
+  },
+
+  /** 倒数日与纪念日（日历右键菜单管理） */
+  anniversaries: {
+    list: (): Promise<Anniversary[]> => invoke('anniversaries:list'),
+    save: (input: AnniversaryInput): Promise<Anniversary> =>
+      invoke('anniversaries:save', input),
+    remove: (id: number): Promise<void> => invoke('anniversaries:remove', id)
+  },
+
+  /** 资产：多平台账户与收支记录 */
+  assets: {
+    accounts: (): Promise<AssetAccount[]> => invoke('assets:accounts'),
+    saveAccount: (input: AssetAccountInput): Promise<AssetAccount> =>
+      invoke('assets:save-account', input),
+    removeAccount: (id: number): Promise<void> => invoke('assets:remove-account', id),
+    records: (filter?: {
+      month?: string
+      kind?: 'income' | 'expense'
+      accountId?: number
+      limit?: number
+    }): Promise<AssetRecordWithAccount[]> => invoke('assets:records', filter ?? {}),
+    saveRecord: (input: AssetRecordInput): Promise<AssetRecordWithAccount> =>
+      invoke('assets:save-record', input),
+    removeRecord: (id: number): Promise<void> => invoke('assets:remove-record', id),
+    summary: (): Promise<AssetsSummary> => invoke('assets:summary'),
+    trend: (days?: number): Promise<AssetTrendPoint[]> => invoke('assets:trend', days ?? 30),
+    categoryStats: (kind: 'income' | 'expense', month?: string): Promise<AssetCategoryStat[]> =>
+      invoke('assets:category-stats', kind, month)
+  },
+
+  /** 攒钱计划与「想买」目标 */
+  savings: {
+    list: (kind: 'plan' | 'wish'): Promise<SavingGoalWithProgress[]> =>
+      invoke('savings:list', kind),
+    save: (input: SavingGoalInput): Promise<SavingGoalWithProgress> =>
+      invoke('savings:save', input),
+    remove: (id: number): Promise<void> => invoke('savings:remove', id),
+    deposit: (goalId: number, amount: number, note?: string): Promise<SavingGoalWithProgress> =>
+      invoke('savings:deposit', goalId, amount, note ?? ''),
+    deposits: (goalId: number): Promise<SavingDeposit[]> => invoke('savings:deposits', goalId)
+  },
+
+  /** 每日心情（首页一键记录 + 日历展示） */
+  moods: {
+    range: (from: string, to: string): Promise<MoodRecord[]> => invoke('moods:range', from, to),
+    set: (date: string, mood: number | null): Promise<MoodRecord | null> =>
+      invoke('moods:set', date, mood)
+  },
+
+  /** 天气（自动定位 + 未来一周预报，主进程缓存） */
+  weather: {
+    report: (force?: boolean): Promise<WeatherResult> => invoke('weather:report', force ?? false)
   }
 }
 
-export type WorkHelperApi = typeof api
+export type WorkbenchApi = typeof api
 
 contextBridge.exposeInMainWorld('api', api)

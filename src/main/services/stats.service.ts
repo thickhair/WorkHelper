@@ -1,10 +1,9 @@
 /**
- * 数据统计服务：单日概览、近 N 天趋势、累计指标与连续打卡统计。
+ * 数据统计服务：单日概览与近 N 天趋势（供首页与每日计划页使用）。
  */
 import { getDb } from '../db/database'
-import type { DayStats, StatsOverview, TrendPoint } from '@shared/types'
-import { computeProgress, formatDate, habitStreak, recentDates, statusLabel } from '@shared/logic'
-import { moduleService } from './module.service'
+import type { DayStats, TrendPoint } from '@shared/types'
+import { computeProgress, formatDate, recentDates, statusLabel } from '@shared/logic'
 
 interface CountRow {
   done: number
@@ -98,39 +97,5 @@ export const statsService = {
         focusMinutes: focusMinutes(date)
       }
     })
-  },
-
-  /** 数据统计页聚合数据 */
-  overview(days = 7, today = formatDate(new Date())): StatsOverview {
-    const db = getDb()
-    const taskRow = db
-      .prepare(
-        `SELECT
-           (SELECT COUNT(*) FROM schedules  WHERE done = 1) +
-           (SELECT COUNT(*) FROM todos      WHERE done = 1) +
-           (SELECT COUNT(*) FROM priorities WHERE done = 1) AS c`
-      )
-      .get() as { c: number }
-    const habitRow = db
-      .prepare('SELECT COALESCE(SUM(count), 0) AS c FROM habit_logs')
-      .get() as { c: number }
-    const focusRow = db
-      .prepare('SELECT COALESCE(SUM(minutes), 0) AS c FROM focus_logs')
-      .get() as { c: number }
-    const dateRows = db
-      .prepare('SELECT DISTINCT date FROM habit_logs WHERE count > 0 ORDER BY date DESC')
-      .all()
-
-    return {
-      totalTaskDone: Number(taskRow.c ?? 0),
-      totalHabitChecks: Number(habitRow.c ?? 0),
-      streakDays: habitStreak(
-        dateRows.map((row) => String(row.date)),
-        today
-      ),
-      totalFocusMinutes: Number(focusRow.c ?? 0),
-      trends: this.trend(days, today),
-      modules: moduleService.trend()
-    }
   }
 }

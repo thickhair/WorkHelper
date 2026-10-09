@@ -1,8 +1,10 @@
 <script setup lang="ts">
 /**
  * 应用根组件：定义整体布局（左侧导航 + 顶部窗口控制条 + 内容区）。
+ * 「设置」入口位于右上角窗口控制按钮旁（不在侧边栏中）。
  */
 import { onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import AppSidebar from './components/AppSidebar.vue'
 import ToastHost from './components/ToastHost.vue'
 import Icon from './components/Icon.vue'
@@ -10,6 +12,8 @@ import { useAppStore } from './stores/app'
 import { useSidebarStore } from './stores/sidebar'
 import { useToastStore } from './stores/toast'
 
+const route = useRoute()
+const router = useRouter()
 const appStore = useAppStore()
 const sidebarStore = useSidebarStore()
 const toast = useToastStore()
@@ -31,6 +35,11 @@ async function toggleMaximize(): Promise<void> {
   maximized.value = await window.api.win.toggleMaximize()
 }
 
+/** 打开设置页（入口位于窗口右上角） */
+async function openSettings(): Promise<void> {
+  if (route.path !== '/settings') await router.push('/settings')
+}
+
 function minimizeWindow(): void {
   void window.api.win.minimize()
 }
@@ -46,6 +55,14 @@ function closeWindow(): void {
     <main class="app-main">
       <header class="window-bar">
         <div class="drag-area" @dblclick="toggleMaximize"></div>
+        <button
+          class="win-btn settings-btn"
+          :class="{ active: route.path === '/settings' }"
+          title="设置"
+          @click="openSettings"
+        >
+          <Icon name="settings" :size="15" />
+        </button>
         <div class="win-controls">
           <button class="win-btn" title="最小化" @click="minimizeWindow">
             <Icon name="minimize" :size="14" />
@@ -133,6 +150,16 @@ function closeWindow(): void {
 .win-btn.close:hover {
   background: #e8564a;
   color: #fff;
+}
+
+/* 右上角设置入口 */
+.settings-btn {
+  margin-right: 4px;
+}
+
+.settings-btn.active {
+  background: var(--hover-tint);
+  color: var(--green-600);
 }
 
 .app-content {

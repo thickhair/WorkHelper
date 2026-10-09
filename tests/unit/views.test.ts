@@ -5,6 +5,7 @@
  */
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { createMemoryHistory, createRouter } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   HabitWithProgress,
@@ -13,8 +14,9 @@ import type {
   ScheduleInput,
   Todo
 } from '@shared/types'
-import { formatDate } from '@shared/logic'
+import { addDays, formatDate } from '@shared/logic'
 import DailyPlanView from '../../src/renderer/src/views/DailyPlanView.vue'
+import HomeView from '../../src/renderer/src/views/HomeView.vue'
 
 const TODAY = formatDate(new Date())
 
@@ -76,6 +78,15 @@ const habits: HabitWithProgress[] = [
 const toggleSchedule = vi.fn(async (id: number, done: boolean) => ({ ...schedules[0], id, done }))
 const toggleTodo = vi.fn(async (id: number, done: boolean) => ({ ...todos[0], id, done }))
 const checkIn = vi.fn(async (id: number) => ({ ...habits[0], id, count: 2 }))
+const setMood = vi.fn(async (date: string, mood: number | null) =>
+  mood === null ? null : { date, mood, updatedAt: '' }
+)
+
+/** 近一年心情记录：昨天、前天已记录（今天未打卡，用于验证打卡状态与连续天数） */
+const moodHistory = [
+  { date: addDays(TODAY, -2), mood: 4, updatedAt: '' },
+  { date: addDays(TODAY, -1), mood: 5, updatedAt: '' }
+]
 
 const apiMock = {
   schedules: {
@@ -115,7 +126,13 @@ const apiMock = {
       habitTotal: 2,
       progress: 33,
       statusLabel: '继续加油'
-    }))
+    })),
+    trend: vi.fn(async () => [])
+  },
+  birthdays: { list: vi.fn(async () => []) },
+  moods: {
+    range: vi.fn(async () => [...moodHistory]),
+    set: setMood
   },
   focus: { create: vi.fn() }
 }
@@ -126,9 +143,21 @@ beforeEach(() => {
   ;(window as unknown as { api: unknown }).api = apiMock
 })
 
+/** 轻量测试路由：满足组件内 useRouter / RouterLink 的注入需求 */
+const router = createRouter({
+  history: createMemoryHistory(),
+  routes: [
+    { path: '/', component: { template: '<div />' } },
+    { path: '/plan', component: { template: '<div />' } },
+    { path: '/calendar', component: { template: '<div />' } },
+    { path: '/assets', component: { template: '<div />' } }
+  ]
+})
+
 async function mountView(): Promise<ReturnType<typeof mount>> {
   const wrapper = mount(DailyPlanView, {
     global: {
+      plugins: [router],
       stubs: { RouterLink: { template: '<a><slot /></a>' } }
     }
   })
@@ -194,5 +223,69 @@ describe('每日计划页面', () => {
     await flushPromises()
     // 点击开始后出现专注计时器
     expect(wrapper.find('.focus-timer').exists()).toBe(true)
+  })
+})
+
+/** 挂载首页（满足 RouterLink / useRouter 注入需求） */
+async function mountHome(): Promise<ReturnType<typeof mount>> {
+  const wrapper = mount(HomeView, {
+    global: {
+      plugins: [router],
+      stubs: { RouterLink: { template: '<a><slot /></a>' } }
+    }
+  })
+  await flushPromises()
+  return wrapper
+}
+
+describe('首页心情打卡', () => {
+  it('未打卡时提示打卡，点击后显示已打卡与连续打卡天数', async () => {
+    const wrapper = await mountHome()
+
+    // 加载近一年记录（今天未打卡）
+    expect(apiMock.moods.range).toHaveBeenCalledWith(addDays(TODAY, -366), TODAY)
+    expect(wrapper.text()).toContain('心情打卡')
+    expect(wrapper.text()).toContain('今天还没打卡')
+    const buttons = wrapper.findAll('.mood-btn')
+    expect(buttons).toHaveLength(5)
+
+    // 点击「开心」完成今日打卡：昨天、前天已记录，连续 3 天
+    await buttons[4].trigger('click')
+    await flushPromises()
+    expect(setMood).toHaveBeenCalledWith(TODAY, 5)
+    expect(wrapper.text()).toContain('已打卡 · 连续打卡 3 天')
+  })
+
+  it('再次点击当前心情可取消打卡，恢复未打卡状态', async () => {
+    const wrapper = await mountHome()
+    const buttons = wrapper.findAll('.mood-btn')
+
+    await buttons[4].trigger('click')
+    await flushPromises()
+    await buttons[4].trigger('click')
+    await flushPromises()
+
+    expect(setMood).toHaveBeenCalledWith(TODAY, null)
+    expect(wrapper.text()).toContain('今天还没打卡')
+  })
+})
+
+describe('首页统计卡片跳转', () => {
+  it('四张统计卡片均为链接，点击后跳转到每日计划', async () => {
+    await router.push('/')
+    const wrapper = mount(HomeView, { global: { plugins: [router] } })
+    await flushPromises()
+
+    const links = wrapper.findAll('a.stat-link')
+    expect(links).toHaveLength(4)
+    for (const link of links) {
+      expect(link.attributes('href')).toBe('/plan')
+      expect(link.attributes('title')).toContain('详情')
+    }
+
+    // 点击第一张卡片（今日任务）跳转到每日计划
+    await links[0].trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.path).toBe('/plan')
   })
 })

@@ -3,15 +3,19 @@
  * 首页仪表盘：今日概览、问候卡片、日程与待办速览、近 7 天趋势与快捷入口。
  */
 import { computed, onMounted, ref } from 'vue'
-import type { TrendPoint } from '@shared/types'
+import type { AssetsSummary, Birthday, MoodRecord, TrendPoint } from '@shared/types'
+import { birthdayDateLabel, daysUntilBirthday } from '@shared/calendar'
 import { featureByRoute } from '@shared/features'
-import { formatDate, greetingByHour, monthDayLabel, weekdayLabel } from '@shared/logic'
+import { formatMoney } from '@shared/assets'
+import { moodLabel, moodStreak } from '@shared/moods'
+import { addDays, formatDate, greetingByHour, monthDayLabel, weekdayLabel } from '@shared/logic'
 import { useAppStore } from '../stores/app'
 import { usePlanStore } from '../stores/plan'
 import { useSidebarStore } from '../stores/sidebar'
 import { useToastStore } from '../stores/toast'
 import Icon from '../components/Icon.vue'
 import MiniBarChart from '../components/MiniBarChart.vue'
+import MoodPicker from '../components/MoodPicker.vue'
 import StatCard from '../components/StatCard.vue'
 
 const appStore = useAppStore()
@@ -21,14 +25,51 @@ const toast = useToastStore()
 
 const today = formatDate(new Date())
 const trends = ref<TrendPoint[]>([])
+const birthdays = ref<Birthday[]>([])
+/** 近一年心情记录（用于连续打卡统计） */
+const moodRecords = ref<MoodRecord[]>([])
+const todayMood = ref<number | null>(null)
+/** 资产概览（金额默认隐藏，点击眼睛图标切换） */
+const assetsSummary = ref<AssetsSummary | null>(null)
+const showAssets = ref(false)
 
 onMounted(async () => {
   try {
     await planStore.load(today)
-    trends.value = await window.api.stats.trend(7)
+    const [trendData, birthdayData, moodData] = await Promise.all([
+      window.api.stats.trend(7),
+      window.api.birthdays.list(),
+      window.api.moods.range(addDays(today, -366), today)
+    ])
+    trends.value = trendData
+    birthdays.value = birthdayData
+    moodRecords.value = moodData
+    todayMood.value = moodData.find((item) => item.date === today)?.mood ?? null
+    if (sidebarStore.isEnabled('assets')) {
+      assetsSummary.value = await window.api.assets.summary()
+    }
   } catch (err) {
     toast.error((err as Error).message)
   }
+})
+
+/** 一键记录今日心情（再次点击当前心情 = 取消记录） */
+async function setMood(value: number | null): Promise<void> {
+  try {
+    await window.api.moods.set(today, value)
+    todayMood.value = value
+    if (value === null) toast.push('已取消今天的心情打卡', 'info')
+    else toast.success(`打卡成功：今天的心情是「${moodLabel(value)}」`)
+  } catch (err) {
+    toast.error((err as Error).message)
+  }
+}
+
+/** 连续打卡天数：近一年记录 + 今日实时状态（今天已记录才计入） */
+const moodStreakDays = computed(() => {
+  const dates = moodRecords.value.map((item) => item.date).filter((date) => date !== today)
+  if (todayMood.value !== null) dates.push(today)
+  return moodStreak(dates, today)
 })
 
 const greeting = computed(() => greetingByHour(new Date().getHours()))
@@ -78,11 +119,10 @@ const trendPoints = computed(() =>
 
 const QUICK_LINKS = [
   { path: '/plan', title: '每日计划', desc: '安排今天的时间块', icon: 'calendar' },
-  { path: '/stats', title: '数据统计', desc: '查看完成趋势', icon: 'chart' },
-  { path: '/review', title: '工作复盘', desc: '记录今日收获', icon: 'notebook' }
+  { path: '/assets', title: '资产', desc: '账户与攒钱进度', icon: 'wallet' }
 ]
 
-/** 快捷入口仅展示已添加到侧边栏的功能 */
+/** 快捷入口展示侧边栏中的功能（固定功能始终包含） */
 const quickLinks = computed(() =>
   QUICK_LINKS.filter((link) => {
     const feature = featureByRoute(link.path)
@@ -92,6 +132,23 @@ const quickLinks = computed(() =>
 
 /** 「每日计划」功能是否已添加（决定日程/待办的跳转入口） */
 const planEnabled = computed(() => sidebarStore.isEnabled('plan'))
+
+/** 「资产」功能是否已添加（决定资产概览卡片显示） */
+const assetsEnabled = computed(() => sidebarStore.isEnabled('assets'))
+
+/** 资产金额展示（默认隐藏为 ****） */
+function assetText(value: number): string {
+  return showAssets.value ? `¥${formatMoney(value)}` : '¥****'
+}
+
+/** 未来 60 天内即将到来的生日（含今天），按临近程度排序 */
+const upcomingBirthdays = computed(() =>
+  birthdays.value
+    .map((item) => ({ birthday: item, daysUntil: daysUntilBirthday(item, today) }))
+    .filter((item) => item.daysUntil >= 0 && item.daysUntil <= 60)
+    .sort((a, b) => a.daysUntil - b.daysUntil)
+    .slice(0, 4)
+)
 
 async function toggleSchedule(id: number, done: boolean): Promise<void> {
   try {
@@ -120,7 +177,9 @@ async function toggleTodo(id: number, done: boolean): Promise<void> {
           <p>今天也要元气满满，按计划前进</p>
         </div>
       </div>
-      <span class="date-chip"><Icon name="calendar" :size="13" />{{ dateText }}</span>
+      <RouterLink class="date-chip" to="/calendar" title="打开日历">
+        <Icon name="calendar" :size="13" />{{ dateText }}<Icon name="chevronRight" :size="12" />
+      </RouterLink>
     </header>
 
     <!-- 欢迎卡片 -->
@@ -145,17 +204,23 @@ async function toggleTodo(id: number, done: boolean): Promise<void> {
       </div>
     </section>
 
-    <!-- 统计卡片 -->
+    <!-- 统计卡片（点击跳转到每日计划查看对应详情） -->
     <section class="stat-row">
-      <StatCard
+      <RouterLink
         v-for="card in statCards"
         :key="card.label"
-        :icon="card.icon"
-        :label="card.label"
-        :value="card.value"
-        :tag="card.tag"
-        :tone="card.tone"
-      />
+        class="stat-link"
+        to="/plan"
+        :title="`查看${card.label}详情`"
+      >
+        <StatCard
+          :icon="card.icon"
+          :label="card.label"
+          :value="card.value"
+          :tag="card.tag"
+          :tone="card.tone"
+        />
+      </RouterLink>
     </section>
 
     <!-- 双栏 -->
@@ -220,6 +285,74 @@ async function toggleTodo(id: number, done: boolean): Promise<void> {
       </div>
 
       <div class="home-col">
+        <!-- 心情打卡（一键记录，显示打卡状态与连续天数） -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title"><Icon name="sun" :size="15" />心情打卡</span>
+            <span class="card-sub">
+              {{ todayMood === null ? '今天还没打卡' : `已打卡 · 连续打卡 ${moodStreakDays} 天` }}
+            </span>
+          </div>
+          <MoodPicker :model-value="todayMood" @update:model-value="setMood" />
+          <p class="mood-tip">每天点一下打卡记录心情，可在日历中回看与补记</p>
+        </div>
+
+        <!-- 资产概览（已添加「资产」功能时显示，金额默认隐藏） -->
+        <div v-if="assetsEnabled" class="card assets-card">
+          <div class="card-header">
+            <span class="card-title"><Icon name="wallet" :size="15" />资产概览</span>
+            <span class="card-sub">{{ assetsSummary?.accountCount ?? 0 }} 个账户</span>
+            <button
+              class="eye-toggle"
+              :title="showAssets ? '隐藏金额' : '显示金额'"
+              @click="showAssets = !showAssets"
+            >
+              <Icon :name="showAssets ? 'eye' : 'eyeOff'" :size="13" />
+            </button>
+            <RouterLink class="card-action" to="/assets">
+              打开资产<Icon name="chevronRight" :size="12" />
+            </RouterLink>
+          </div>
+          <div class="assets-total">
+            <span class="assets-total-label">总资产</span>
+            <span class="assets-total-value">{{ assetText(assetsSummary?.total ?? 0) }}</span>
+          </div>
+          <div class="assets-month">
+            <span class="assets-month-item income">
+              本月收入 +{{ assetText(assetsSummary?.monthIncome ?? 0) }}
+            </span>
+            <span class="assets-month-item expense">
+              本月支出 -{{ assetText(assetsSummary?.monthExpense ?? 0) }}
+            </span>
+          </div>
+          <p class="mood-tip">金额为手动记账口径，点击眼睛图标可显示或隐藏</p>
+        </div>
+
+        <!-- 生日提醒（未来 60 天内有生日时显示） -->
+        <div v-if="upcomingBirthdays.length > 0" class="card">
+          <div class="card-header">
+            <span class="card-title"><Icon name="gift" :size="15" />生日提醒</span>
+            <span class="card-sub">未来 60 天</span>
+            <RouterLink class="card-action" to="/calendar">
+              打开日历<Icon name="chevronRight" :size="12" />
+            </RouterLink>
+          </div>
+          <div class="row-list">
+            <div v-for="item in upcomingBirthdays" :key="item.birthday.id" class="row compact">
+              <span class="birth-badge"><Icon name="gift" :size="13" /></span>
+              <div class="row-main">
+                <span class="row-title">{{ item.birthday.name }}</span>
+                <span class="row-desc">
+                  {{ birthdayDateLabel(item.birthday) }}（{{ item.birthday.calendar === 'lunar' ? '农历' : '公历' }}）
+                </span>
+              </div>
+              <span class="until-chip" :class="{ soon: item.daysUntil <= item.birthday.remindDays }">
+                {{ item.daysUntil === 0 ? '今天' : `${item.daysUntil} 天后` }}
+              </span>
+            </div>
+          </div>
+        </div>
+
         <!-- 近 7 天趋势 -->
         <div class="card">
           <div class="card-header">
@@ -305,10 +438,119 @@ async function toggleTodo(id: number, done: boolean): Promise<void> {
   box-shadow: var(--shadow-card);
   font-size: 12px;
   font-weight: 600;
+  color: var(--text-1);
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.date-chip:hover {
+  background: var(--green-100);
+  color: var(--green-700);
 }
 
 .date-chip .icon {
   color: var(--green-600);
+}
+
+/* --------------------------- 心情打卡与生日提醒 --------------------------- */
+.mood-tip {
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+/* ------------------------------ 资产概览 ------------------------------ */
+.assets-card .card-action {
+  margin-left: 0;
+}
+
+.eye-toggle {
+  margin-left: auto;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border: none;
+  border-radius: 8px;
+  background: var(--plain-bg);
+  color: var(--text-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.eye-toggle:hover {
+  background: var(--green-100);
+  color: var(--green-700);
+}
+
+.assets-total {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.assets-total-label {
+  font-size: 12px;
+  color: var(--text-3);
+  font-weight: 600;
+}
+
+.assets-total-value {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  color: var(--text-1);
+}
+
+.assets-month {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.assets-month-item {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.assets-month-item.income {
+  color: var(--green-600);
+}
+
+.assets-month-item.expense {
+  color: var(--red);
+}
+
+.birth-badge {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: 9px;
+  background: var(--yellow-soft);
+  color: var(--yellow-ink);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.until-chip {
+  flex: none;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--plain-bg);
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.until-chip.soon {
+  background: var(--red-soft);
+  color: var(--red);
 }
 
 /* ------------------------------ 欢迎卡片 ------------------------------ */
@@ -416,6 +658,32 @@ async function toggleTodo(id: number, done: boolean): Promise<void> {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
+}
+
+/* 统计卡片作为整体可点击（跳转到每日计划） */
+.stat-link {
+  display: flex;
+  border-radius: 14px;
+  text-decoration: none;
+  color: inherit;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.stat-link :deep(.stat-card) {
+  width: 100%;
+}
+
+.stat-link:hover {
+  transform: translateY(-2px);
+}
+
+.stat-link:hover :deep(.stat-card) {
+  box-shadow: var(--shadow-card);
+}
+
+.stat-link:focus-visible {
+  outline: 2px solid var(--green-500);
+  outline-offset: 2px;
 }
 
 .home-grid {

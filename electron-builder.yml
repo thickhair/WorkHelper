@@ -1,6 +1,6 @@
-appId: com.workhelper.desktop
-productName: WorkHelper
-copyright: Copyright © 2026 WorkHelper
+appId: com.workbench.desktop
+productName: Workbench
+copyright: Copyright © 2026 Workbench
 directories:
   buildResources: build
   output: dist
@@ -26,7 +26,7 @@ asarUnpack:
   - '**/node_modules/better-sqlite3/**'
   - resources/**
 win:
-  executableName: WorkHelper
+  executableName: Workbench
   icon: build/icon.ico
   target:
     - target: nsis
@@ -35,7 +35,7 @@ win:
 nsis:
   artifactName: ${productName}-${version}-Setup.${ext}
   shortcutName: 个人工作台
-  uninstallDisplayName: 个人工作台 WorkHelper
+  uninstallDisplayName: 个人工作台 Workbench
   createDesktopShortcut: always
   createStartMenuShortcut: true
   oneClick: false

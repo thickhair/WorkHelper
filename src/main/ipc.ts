@@ -3,13 +3,17 @@
  * 统一返回 { ok, data, error } 结构，异常不会导致主进程崩溃。
  */
 import { BrowserWindow, ipcMain } from 'electron'
+import { anniversaryService } from './services/anniversary.service'
+import { assetService } from './services/asset.service'
+import { birthdayService } from './services/birthday.service'
 import { habitService } from './services/habit.service'
-import { moduleService } from './services/module.service'
-import { newsService } from './services/news.service'
+import { moodService } from './services/mood.service'
+import { savingsService } from './services/savings.service'
 import { priorityService, scheduleService, todoService } from './services/task.service'
-import { reviewService } from './services/review.service'
 import { focusService, settingsService } from './services/settings.service'
 import { statsService } from './services/stats.service'
+import { storageService } from './services/storage.service'
+import { weatherService } from './services/weather.service'
 
 /** 包装处理器：捕获异常并返回统一结构 */
 function handle(channel: string, fn: (...args: never[]) => unknown): void {
@@ -56,8 +60,13 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
   handle('app:open-data-dir', () => settingsService.openDataDir())
   handle('app:open-external', (url: string) => settingsService.openExternal(url))
 
+  /* ---------------------------- 数据存储位置 ---------------------------- */
+  handle('app:storage-info', () => storageService.info())
+  handle('app:change-storage', () => storageService.change(getMainWindow()))
+
   /* -------------------------------- 日程 -------------------------------- */
   handle('schedules:list', (date: string) => scheduleService.list(date))
+  handle('schedules:range', (from: string, to: string) => scheduleService.listRange(from, to))
   handle('schedules:create', (input: never) => scheduleService.create(input))
   handle('schedules:update', (id: number, patch: never) => scheduleService.update(id, patch))
   handle('schedules:toggle', (id: number, done: boolean) => scheduleService.toggle(id, done))
@@ -86,42 +95,51 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
     habitService.checkIn(id, date, delta)
   )
 
-  /* ------------------------------ 分类模块 ------------------------------ */
-  handle('modules:list', () => moduleService.list())
-  handle('modules:update-goal', (key: string, goal: string) => moduleService.updateGoal(key, goal))
-  handle('modules:records', (key: string) => moduleService.records(key))
-  handle('modules:create-record', (input: never) => moduleService.createRecord(input))
-  handle('modules:update-record', (id: number, patch: never) => moduleService.updateRecord(id, patch))
-  handle('modules:remove-record', (id: number) => moduleService.removeRecord(id))
-  handle('modules:summary', (key: string) => moduleService.summary(key))
-  handle('modules:notes', (key: string) => moduleService.notes(key))
-  handle('modules:create-note', (input: never) => moduleService.createNote(input))
-  handle('modules:update-note', (id: number, patch: never) => moduleService.updateNote(id, patch))
-  handle('modules:remove-note', (id: number) => moduleService.removeNote(id))
-
-  /* ------------------------------ 新闻资讯 ------------------------------ */
-  handle('news:list', (keyword: string, favoriteOnly: boolean) =>
-    newsService.list(keyword, favoriteOnly)
-  )
-  handle('news:create', (input: never) => newsService.create(input))
-  handle('news:update', (id: number, patch: never) => newsService.update(id, patch))
-  handle('news:toggle-favorite', (id: number) => newsService.toggleFavorite(id))
-  handle('news:remove', (id: number) => newsService.remove(id))
-
-  /* ------------------------------ 工作复盘 ------------------------------ */
-  handle('reviews:list', () => reviewService.list())
-  handle('reviews:get', (date: string) => reviewService.get(date))
-  handle('reviews:save', (input: never) => reviewService.save(input))
-  handle('reviews:remove', (date: string) => reviewService.remove(date))
-
   /* ------------------------------ 数据统计 ------------------------------ */
   handle('stats:day', (date: string) => statsService.day(date))
   handle('stats:trend', (days: number) => statsService.trend(days))
-  handle('stats:overview', (days: number) => statsService.overview(days))
 
   /* ------------------------------ 专注计时 ------------------------------ */
   handle('focus:create', (payload: { date: string; title: string; minutes: number }) =>
     focusService.create(payload)
   )
-  handle('focus:overview', (date: string, limit: number) => focusService.overview(date, limit))
+
+  /* --------------------------- 日历与生日提醒 --------------------------- */
+  handle('birthdays:list', () => birthdayService.list())
+  handle('birthdays:save', (input: never) => birthdayService.save(input))
+  handle('birthdays:remove', (id: number) => birthdayService.remove(id))
+
+  /* --------------------------- 倒数日与纪念日 --------------------------- */
+  handle('anniversaries:list', () => anniversaryService.list())
+  handle('anniversaries:save', (input: never) => anniversaryService.save(input))
+  handle('anniversaries:remove', (id: number) => anniversaryService.remove(id))
+
+  /* -------------------------------- 资产 -------------------------------- */
+  handle('assets:accounts', () => assetService.accounts())
+  handle('assets:save-account', (input: never) => assetService.saveAccount(input))
+  handle('assets:remove-account', (id: number) => assetService.removeAccount(id))
+  handle('assets:records', (filter: never) => assetService.records(filter))
+  handle('assets:save-record', (input: never) => assetService.saveRecord(input))
+  handle('assets:remove-record', (id: number) => assetService.removeRecord(id))
+  handle('assets:summary', () => assetService.summary())
+  handle('assets:trend', (days: number) => assetService.trend(days))
+  handle('assets:category-stats', (kind: 'income' | 'expense', month?: string) =>
+    assetService.categoryStats(kind, month)
+  )
+
+  /* ----------------------------- 攒钱与想买 ----------------------------- */
+  handle('savings:list', (kind: 'plan' | 'wish') => savingsService.list(kind))
+  handle('savings:save', (input: never) => savingsService.save(input))
+  handle('savings:remove', (id: number) => savingsService.remove(id))
+  handle('savings:deposit', (goalId: number, amount: number, note: string) =>
+    savingsService.deposit(goalId, amount, note)
+  )
+  handle('savings:deposits', (goalId: number) => savingsService.deposits(goalId))
+
+  /* ------------------------------ 每日心情 ------------------------------ */
+  handle('moods:range', (from: string, to: string) => moodService.range(from, to))
+  handle('moods:set', (date: string, mood: number | null) => moodService.set(date, mood))
+
+  /* -------------------------------- 天气 -------------------------------- */
+  handle('weather:report', (force: boolean) => weatherService.report(force === true))
 }

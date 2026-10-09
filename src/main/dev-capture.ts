@@ -1,5 +1,5 @@
 /**
- * 开发调试模块：按环境变量 WORKHELPER_CAPTURE_DIR 指定的目录，
+ * 开发调试模块：按环境变量 WORKBENCH_CAPTURE_DIR 指定的目录，
  * 依次切换路由并保存窗口截图（用于 UI 验证，不影响正常启动流程）。
  */
 import { app, BrowserWindow } from 'electron'
@@ -10,14 +10,10 @@ import { join } from 'path'
 const PAGES: Array<[string, string]> = [
   ['01-home', '/'],
   ['02-plan', '/plan'],
-  ['03-module-fitness', '/m/fitness'],
-  ['04-module-english', '/m/english'],
-  ['05-news', '/news'],
-  ['06-review', '/review'],
-  ['07-stats', '/stats'],
-  ['08-settings', '/settings'],
-  ['09-plaza', '/plaza'],
-  ['10-focus', '/focus']
+  ['03-calendar', '/calendar'],
+  ['04-assets', '/assets'],
+  ['05-plaza', '/plaza'],
+  ['06-settings', '/settings']
 ]
 
 function delay(ms: number): Promise<void> {
@@ -26,7 +22,7 @@ function delay(ms: number): Promise<void> {
 
 /** 若设置了截图目录，则在窗口加载完成后依次截图并退出 */
 export function setupDevCapture(win: BrowserWindow): void {
-  const dir = process.env['WORKHELPER_CAPTURE_DIR']
+  const dir = process.env['WORKBENCH_CAPTURE_DIR']
   if (!dir) return
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
 
@@ -37,6 +33,11 @@ export function setupDevCapture(win: BrowserWindow): void {
     void (async () => {
       try {
         win.showInactive()
+        // 非激活窗口下合成器驱动的 CSS 过渡可能停滞（截图会抓到半透明中间态），
+        // 截图模式下禁用过渡与动画，保证每页截到最终状态
+        await win.webContents.insertCSS(
+          '*, *::before, *::after { transition: none !important; animation: none !important; }'
+        )
         await delay(1200)
         for (const [name, hash] of PAGES) {
           await win.webContents.executeJavaScript(`window.location.hash = '#${hash}'`)

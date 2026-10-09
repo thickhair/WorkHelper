@@ -1,8 +1,8 @@
-import type { WorkHelperApi } from './index'
+import type { WorkbenchApi } from './index'
 
 declare global {
   interface Window {
-    api: WorkHelperApi
+    api: WorkbenchApi
   }
 }
 
