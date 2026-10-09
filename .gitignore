@@ -1,0 +1,14 @@
+node_modules/
+out/
+dist/
+*.local
+.DS_Store
+*.log
+
+# 本地调试 / 验证产物（便携数据、截图、打包缓存、NSIS 实验）
+.dev-data/
+.tmp-shot/
+.tmp-nsis/
+.verify-data/
+.verify-shots/
+.eb-cache/

@@ -1,0 +1,48 @@
+appId: com.workhelper.desktop
+productName: WorkHelper
+copyright: Copyright © 2026 WorkHelper
+directories:
+  buildResources: build
+  output: dist
+# 使用已下载到本地的 Electron 发行版，避免打包时重复下载
+electronDist: node_modules/electron/dist
+files:
+  - '!**/.vscode/*'
+  - '!src/*'
+  - '!docs/*'
+  - '!tests/*'
+  - '!scripts/*'
+  # 本地调试 / 验证 / 缓存产物不打入安装包
+  - '!.dev-data/*'
+  - '!.tmp-shot/*'
+  - '!.tmp-nsis/*'
+  - '!.verify-data/*'
+  - '!.verify-shots/*'
+  - '!.eb-cache/*'
+  - '!build/*'
+  - '!electron.vite.config.{js,ts,mjs,cjs}'
+  - '!{.eslintrc.cjs,.prettierrc,tsconfig.json,tsconfig.node.json,tsconfig.web.json,electron-builder.yml,vitest.config.ts}'
+asarUnpack:
+  - '**/node_modules/better-sqlite3/**'
+  - resources/**
+win:
+  executableName: WorkHelper
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+nsis:
+  artifactName: ${productName}-${version}-Setup.${ext}
+  shortcutName: 个人工作台
+  uninstallDisplayName: 个人工作台 WorkHelper
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+  installerLanguages:
+    - zh_CN
+  language: '2052'
+npmRebuild: false
