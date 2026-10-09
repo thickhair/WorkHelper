@@ -413,4 +413,15 @@ async function openDataDir(): Promise<void> {
   word-break: break-all;
   user-select: text;
 }
+
+/* 窄窗口（≤700px）：主题卡片与关于信息收窄排列，避免拥挤 */
+@media (max-width: 700px) {
+  .theme-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .about-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 </style>

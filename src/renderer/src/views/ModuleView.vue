@@ -725,4 +725,14 @@ function editOpenedNote(): void {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+@media (max-width: 700px) {
+  .overview-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .goal-input {
+    width: 100%;
+  }
+}
 </style>

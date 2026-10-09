@@ -68,7 +68,8 @@ const router = createRouter({
   routes
 })
 
-// 已从侧边栏移除的功能不可直接访问，统一回到首页
+// 已从侧边栏移除的功能不可直接访问（「功能广场」作为功能总入口始终可访问），
+// 统一跳转到侧边栏中的第一个功能；侧边栏为空时跳到功能广场，便于重新添加
 router.beforeEach(async (to) => {
   const sidebar = useSidebarStore()
   if (!sidebar.ready) {
@@ -79,8 +80,11 @@ router.beforeEach(async (to) => {
     }
   }
   const feature = featureByRoute(to.path)
-  if (feature && !sidebar.isEnabled(feature.id)) return { path: '/' }
-  return true
+  if (!feature || feature.id === 'plaza') return true
+  if (sidebar.isEnabled(feature.id)) return true
+  const fallback = sidebar.items[0]?.route ?? '/plaza'
+  if (fallback === to.path) return true
+  return { path: fallback }
 })
 
 // 记录路由跳转，便于排查页面加载问题

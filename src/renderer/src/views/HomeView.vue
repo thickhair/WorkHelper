@@ -529,4 +529,10 @@ async function toggleTodo(id: number, done: boolean): Promise<void> {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+@media (max-width: 560px) {
+  .stat-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 </style>

@@ -50,11 +50,8 @@ beforeEach(() => {
 })
 
 describe('功能目录', () => {
-  it('默认侧边栏包含常用功能与学习模块，且不含默认未添加的专注空间', () => {
-    expect(DEFAULT_SIDEBAR).toContain('plan')
-    expect(DEFAULT_SIDEBAR).toContain('m-english')
-    expect(DEFAULT_SIDEBAR).toContain('stats')
-    expect(DEFAULT_SIDEBAR).not.toContain('focus')
+  it('默认侧边栏只包含「每日计划」', () => {
+    expect(DEFAULT_SIDEBAR).toEqual(['plan'])
   })
 
   it('规范化配置会过滤未知项与重复项，并统一为目录顺序', () => {
@@ -64,14 +61,11 @@ describe('功能目录', () => {
 })
 
 describe('侧边栏配置', () => {
-  it('固定功能（首页 / 功能广场 / 设置）始终显示', async () => {
+  it('默认配置下侧边栏只显示「每日计划」（首页 / 功能广场 / 设置默认不在列表中）', async () => {
+    getSettings.mockResolvedValueOnce({ ...settings, sidebar: [...DEFAULT_SIDEBAR] })
     const store = useSidebarStore()
     await store.init()
-    const ids = store.items.map((item) => item.id)
-    expect(ids).toContain('home')
-    expect(ids).toContain('plaza')
-    expect(ids).toContain('settings')
-    expect(ids).not.toContain('plan')
+    expect(store.items.map((item) => item.id)).toEqual(['plan'])
   })
 
   it('init 会读取已保存的配置并生效', async () => {
@@ -97,12 +91,15 @@ describe('侧边栏配置', () => {
     expect(store.items.map((item) => item.id)).not.toContain('plan')
   })
 
-  it('固定功能不可移除', async () => {
+  it('所有功能都可移除（含首页 / 功能广场 / 设置）', async () => {
+    getSettings.mockResolvedValueOnce({ ...settings, sidebar: ['home', 'plaza', 'plan', 'settings'] })
     const store = useSidebarStore()
-    const before = store.items.map((item) => item.id)
-    await store.remove('home')
-    expect(setSidebar).not.toHaveBeenCalled()
-    expect(store.items.map((item) => item.id)).toEqual(before)
+    await store.init()
+    await store.remove('plaza')
+    expect(setSidebar).toHaveBeenCalledTimes(1)
+    expect(setSidebar.mock.calls[0][0]).not.toContain('plaza')
+    expect(store.enabled).not.toContain('plaza')
+    expect(store.items.map((item) => item.id)).not.toContain('plaza')
   })
 })
 
@@ -163,15 +160,34 @@ describe('侧边栏移除交互', () => {
     return wrapper
   }
 
-  it('普通功能显示移除按钮，固定功能不显示', async () => {
-    getSettings.mockResolvedValueOnce({ ...settings, sidebar: [...DEFAULT_SIDEBAR] })
+  it('所有侧边栏功能都显示移除按钮', async () => {
+    getSettings.mockResolvedValueOnce({ ...settings, sidebar: ['home', 'plan', 'settings'] })
+    await useSidebarStore().init()
     const wrapper = await mountSidebar()
 
     const homeItem = wrapper.findAll('.menu-item').find((item) => item.text().includes('首页'))
-    expect(homeItem?.find('.remove-btn').exists()).toBe(false)
+    expect(homeItem?.find('.remove-btn').exists()).toBe(true)
 
     const planItem = wrapper.findAll('.menu-item').find((item) => item.text().includes('每日计划'))
     expect(planItem?.find('.remove-btn').exists()).toBe(true)
+  })
+
+  it('侧边栏未包含「功能广场」时显示常驻「添加功能」入口，点击进入功能广场', async () => {
+    getSettings.mockResolvedValueOnce({ ...settings, sidebar: [...DEFAULT_SIDEBAR] })
+    await useSidebarStore().init()
+    const wrapper = await mountSidebar()
+
+    const addEntry = wrapper.find('.foot-add')
+    expect(addEntry.exists()).toBe(true)
+    await addEntry.trigger('click')
+    expect(pushMock).toHaveBeenCalledWith('/plaza')
+  })
+
+  it('「功能广场」已在侧边栏时不显示常驻入口', async () => {
+    getSettings.mockResolvedValueOnce({ ...settings, sidebar: ['plan', 'plaza'] })
+    await useSidebarStore().init()
+    const wrapper = await mountSidebar()
+    expect(wrapper.find('.foot-add').exists()).toBe(false)
   })
 
   it('点击移除按钮会从侧边栏移除该功能并持久化', async () => {
@@ -187,7 +203,7 @@ describe('侧边栏移除交互', () => {
     expect(wrapper.text()).not.toContain('每日计划')
   })
 
-  it('移除当前所在功能时会跳转回首页', async () => {
+  it('移除当前所在功能时会触发跳转', async () => {
     getSettings.mockResolvedValueOnce({ ...settings, sidebar: [...DEFAULT_SIDEBAR] })
     routeMock.path = '/plan'
     const wrapper = await mountSidebar()

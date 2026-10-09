@@ -325,6 +325,7 @@ function askRemoveNews(item: NewsItem): void {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .search-box {
@@ -355,8 +356,15 @@ function askRemoveNews(item: NewsItem): void {
 
 .news-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
   gap: 14px;
+}
+
+/* 窄窗口（≤700px）：搜索框占满整行，工具按钮自动换行 */
+@media (max-width: 700px) {
+  .search-box {
+    width: 100%;
+  }
 }
 
 .news-card {

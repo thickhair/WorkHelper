@@ -2,26 +2,29 @@
  * 侧边栏状态：按「功能广场」的配置动态生成导航项，并持久化到本地设置。
  */
 import { defineStore } from 'pinia'
-import { DEFAULT_SIDEBAR, FEATURE_CATALOG, normalizeSidebar, type FeatureDef } from '@shared/features'
+import {
+  DEFAULT_SIDEBAR,
+  FEATURE_CATALOG,
+  normalizeSidebar,
+  type FeatureDef
+} from '@shared/features'
 
 export const useSidebarStore = defineStore('sidebar', {
   state: () => ({
-    /** 已添加到侧边栏的可自定义功能 id（固定功能不在此列表中） */
+    /** 已添加到侧边栏的功能 id（默认仅「每日计划」） */
     enabled: [...DEFAULT_SIDEBAR] as string[],
     ready: false
   }),
   getters: {
-    /** 当前显示在侧边栏的功能（按功能目录顺序，固定功能始终包含） */
+    /** 当前显示在侧边栏的功能（按功能目录顺序） */
     items(state): FeatureDef[] {
-      return FEATURE_CATALOG.filter((f) => f.fixed === true || state.enabled.includes(f.id))
+      return FEATURE_CATALOG.filter((f) => state.enabled.includes(f.id))
     }
   },
   actions: {
     /** 功能是否显示在侧边栏 */
     isEnabled(id: string): boolean {
-      const def = FEATURE_CATALOG.find((f) => f.id === id)
-      if (!def) return false
-      return def.fixed === true || this.enabled.includes(id)
+      return this.enabled.includes(id) && FEATURE_CATALOG.some((f) => f.id === id)
     },
 
     /** 首次启动时从设置中读取配置 */
@@ -34,19 +37,17 @@ export const useSidebarStore = defineStore('sidebar', {
 
     /** 将功能添加到侧边栏 */
     async add(id: string): Promise<void> {
-      const def = FEATURE_CATALOG.find((f) => f.id === id)
-      if (!def || def.fixed || this.enabled.includes(id)) return
+      if (!FEATURE_CATALOG.some((f) => f.id === id) || this.enabled.includes(id)) return
       await this.persist([...this.enabled, id])
     },
 
-    /** 从侧边栏移除功能（固定功能不可移除） */
+    /** 从侧边栏移除功能（数据不受影响，可在功能广场重新添加） */
     async remove(id: string): Promise<void> {
-      const def = FEATURE_CATALOG.find((f) => f.id === id)
-      if (!def || def.fixed || !this.enabled.includes(id)) return
+      if (!this.enabled.includes(id)) return
       await this.persist(this.enabled.filter((item) => item !== id))
     },
 
-    /** 恢复默认配置 */
+    /** 恢复默认配置（初始仅「每日计划」） */
     async restoreDefaults(): Promise<void> {
       await this.persist([...DEFAULT_SIDEBAR])
     },

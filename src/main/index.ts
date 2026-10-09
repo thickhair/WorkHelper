@@ -19,8 +19,9 @@ function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1380,
     height: 900,
-    minWidth: 1080,
-    minHeight: 680,
+    // 最小尺寸放宽：窄窗口下侧边栏会自动收起为图标（见 AppSidebar.vue）
+    minWidth: 480,
+    minHeight: 460,
     show: false,
     frame: false,
     backgroundColor: '#F3F7F3',

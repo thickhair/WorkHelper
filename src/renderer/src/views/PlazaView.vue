@@ -40,7 +40,7 @@ const groups = computed(() =>
   })).filter((item) => item.features.length > 0)
 )
 
-/** 已显示在侧边栏的功能数量（含固定功能） */
+/** 已显示在侧边栏的功能数量 */
 const enabledCount = computed(() => sidebar.items.length)
 
 function isEnabled(def: FeatureDef): boolean {
@@ -111,7 +111,6 @@ async function openFeature(def: FeatureDef): Promise<void> {
     <section v-for="group in groups" :key="group.group" class="card">
       <div class="card-header">
         <span class="card-title"><Icon name="grid" :size="15" />{{ group.label }}</span>
-        <span v-if="group.group === 'system'" class="card-sub">固定显示，不可移除</span>
       </div>
 
       <div class="feature-grid">
@@ -125,40 +124,29 @@ async function openFeature(def: FeatureDef): Promise<void> {
           <div class="fc-body">
             <span class="fc-name">
               {{ feature.name }}
-              <span v-if="feature.fixed" class="tag tag-plain">固定</span>
-              <span v-else-if="isEnabled(feature)" class="tag">已添加</span>
+              <span v-if="isEnabled(feature)" class="tag">已添加</span>
             </span>
             <span class="fc-desc">{{ feature.desc }}</span>
           </div>
           <div class="fc-actions">
             <button
-              v-if="feature.fixed"
+              v-if="isEnabled(feature)"
+              class="btn btn-plain btn-sm"
+              @click="removeFeature(feature)"
+            >
+              移除
+            </button>
+            <button v-else class="btn btn-primary btn-sm" @click="addFeature(feature)">
+              <Icon name="plus" :size="12" />添加
+            </button>
+            <button
+              v-if="isEnabled(feature)"
               class="icon-btn"
               title="打开"
               @click="openFeature(feature)"
             >
               <Icon name="arrowRight" :size="13" />
             </button>
-            <template v-else>
-              <button
-                v-if="isEnabled(feature)"
-                class="btn btn-plain btn-sm"
-                @click="removeFeature(feature)"
-              >
-                移除
-              </button>
-              <button v-else class="btn btn-primary btn-sm" @click="addFeature(feature)">
-                <Icon name="plus" :size="12" />添加
-              </button>
-              <button
-                v-if="isEnabled(feature)"
-                class="icon-btn"
-                title="打开"
-                @click="openFeature(feature)"
-              >
-                <Icon name="arrowRight" :size="13" />
-              </button>
-            </template>
           </div>
         </div>
       </div>

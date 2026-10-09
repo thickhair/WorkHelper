@@ -30,6 +30,11 @@ async function removeItem(id: string, name: string, path: string): Promise<void>
     toast.error((err as Error).message)
   }
 }
+
+/** 打开功能广场（侧边栏未包含「功能广场」时的常驻入口） */
+async function openPlaza(): Promise<void> {
+  await router.push('/plaza')
+}
 </script>
 
 <template>
@@ -51,11 +56,11 @@ async function removeItem(id: string, name: string, path: string): Promise<void>
         :to="item.route"
         class="menu-item"
         :class="{ active: isActive(item.route) }"
+        :title="item.name"
       >
         <Icon :name="item.icon" :size="15" />
         <span class="menu-title">{{ item.name }}</span>
         <button
-          v-if="!item.fixed"
           class="remove-btn"
           title="从侧边栏移除"
           @click.prevent.stop="removeItem(item.id, item.name, item.route)"
@@ -66,7 +71,16 @@ async function removeItem(id: string, name: string, path: string): Promise<void>
     </nav>
 
     <div class="sidebar-foot">
-      <span>V1.0 · 数据本地存储</span>
+      <button
+        v-if="!sidebar.isEnabled('plaza')"
+        class="foot-add"
+        title="功能广场：添加或移除侧边栏功能"
+        @click="openPlaza"
+      >
+        <Icon name="plus" :size="11" />
+        <span class="foot-add-text">添加功能</span>
+      </button>
+      <span class="foot-text">V1.0 · 数据本地存储</span>
     </div>
   </aside>
 </template>
@@ -199,8 +213,71 @@ async function removeItem(id: string, name: string, path: string): Promise<void>
 
 .sidebar-foot {
   flex: none;
-  padding: 10px 16px 12px;
+  padding: 10px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* 侧边栏未包含「功能广场」时的常驻入口 */
+.foot-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.foot-add:hover {
+  background: rgba(255, 255, 255, 0.3);
+  color: #fff;
+}
+
+.foot-text {
   font-size: 10px;
   color: rgba(255, 255, 255, 0.55);
+}
+
+/* 窄窗口（≤860px）：侧边栏收起为图标，给内容区留出空间 */
+@media (max-width: 860px) {
+  .sidebar {
+    width: 60px;
+  }
+
+  .logo-text,
+  .menu-title,
+  .remove-btn,
+  .foot-add-text,
+  .foot-text {
+    display: none;
+  }
+
+  .sidebar-menu {
+    padding: 4px 6px 10px;
+  }
+
+  .menu-item {
+    justify-content: center;
+    padding: 0;
+  }
+
+  .sidebar-foot {
+    padding: 8px 0 10px;
+    align-items: center;
+  }
+
+  .foot-add {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+  }
 }
 </style>

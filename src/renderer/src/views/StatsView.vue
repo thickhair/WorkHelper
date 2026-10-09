@@ -300,4 +300,10 @@ const hasModuleData = computed(() => (overview.value?.modules ?? []).some((m) =>
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+@media (max-width: 560px) {
+  .metric-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 </style>

@@ -295,7 +295,7 @@ function askRemoveReview(item: Review): void {
 
 .review-list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(400px, 100%), 1fr));
   gap: 14px;
   align-items: start;
 }
