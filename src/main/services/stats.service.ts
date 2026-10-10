@@ -10,20 +10,16 @@ interface CountRow {
   total: number
 }
 
-/** 统计指定日期「日程 + 待办 + 重要事项」的完成情况 */
+/** 统计指定日期日程的完成情况 */
 function taskCount(date: string): CountRow {
   const db = getDb()
   const row = db
     .prepare(
-      `SELECT
-         (SELECT COUNT(*) FROM schedules  WHERE date = ?) +
-         (SELECT COUNT(*) FROM todos      WHERE date = ?) +
-         (SELECT COUNT(*) FROM priorities WHERE date = ?) AS total,
-         (SELECT COUNT(*) FROM schedules  WHERE date = ? AND done = 1) +
-         (SELECT COUNT(*) FROM todos      WHERE date = ? AND done = 1) +
-         (SELECT COUNT(*) FROM priorities WHERE date = ? AND done = 1) AS done`
+      `SELECT COUNT(*) AS total,
+              COALESCE(SUM(CASE WHEN done = 1 THEN 1 ELSE 0 END), 0) AS done
+       FROM schedules WHERE date = ?`
     )
-    .get(date, date, date, date, date, date) as { done: number; total: number }
+    .get(date) as { done: number; total: number }
   return { done: Number(row.done ?? 0), total: Number(row.total ?? 0) }
 }
 

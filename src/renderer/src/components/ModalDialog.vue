@@ -48,7 +48,7 @@ const emit = defineEmits<{ (e: 'close'): void }>()
   align-items: center;
   justify-content: center;
   z-index: 2000;
-  backdrop-filter: blur(2px);
+  backdrop-filter: blur(3px);
 }
 
 .modal {
@@ -57,8 +57,9 @@ const emit = defineEmits<{ (e: 'close'): void }>()
   display: flex;
   flex-direction: column;
   background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  box-shadow: 0 18px 50px var(--overlay);
+  box-shadow: var(--shadow-pop);
   overflow: hidden;
 }
 
@@ -72,6 +73,7 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 .modal-title {
   font-size: 14px;
   font-weight: 700;
+  letter-spacing: 0.2px;
 }
 
 .modal-body {
@@ -88,12 +90,12 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 
 .modal-enter-active,
 .modal-leave-active {
-  transition: opacity 0.18s ease;
+  transition: opacity var(--dur-2) var(--ease-std);
 }
 
 .modal-enter-active .modal,
 .modal-leave-active .modal {
-  transition: transform 0.18s ease;
+  transition: transform var(--dur-2) var(--ease-std);
 }
 
 .modal-enter-from,

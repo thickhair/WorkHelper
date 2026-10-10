@@ -6,10 +6,11 @@ import { BrowserWindow, ipcMain } from 'electron'
 import { anniversaryService } from './services/anniversary.service'
 import { assetService } from './services/asset.service'
 import { birthdayService } from './services/birthday.service'
+import { bookService, bookmarkService } from './services/book.service'
 import { habitService } from './services/habit.service'
 import { moodService } from './services/mood.service'
 import { savingsService } from './services/savings.service'
-import { priorityService, scheduleService, todoService } from './services/task.service'
+import { scheduleService } from './services/task.service'
 import { focusService, settingsService } from './services/settings.service'
 import { statsService } from './services/stats.service'
 import { storageService } from './services/storage.service'
@@ -48,6 +49,12 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
     getMainWindow()?.close()
   })
   handle('window:is-maximized', () => getMainWindow()?.isMaximized() ?? false)
+  handle('window:set-fullscreen', (flag: boolean) => {
+    const win = getMainWindow()
+    if (!win) return false
+    win.setFullScreen(flag === true)
+    return win.isFullScreen()
+  })
 
   /* --------------------------- 设置与数据安全 --------------------------- */
   handle('app:get-settings', () => settingsService.get())
@@ -71,20 +78,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
   handle('schedules:update', (id: number, patch: never) => scheduleService.update(id, patch))
   handle('schedules:toggle', (id: number, done: boolean) => scheduleService.toggle(id, done))
   handle('schedules:remove', (id: number) => scheduleService.remove(id))
-
-  /* -------------------------------- 待办 -------------------------------- */
-  handle('todos:list', (date: string) => todoService.list(date))
-  handle('todos:create', (input: never) => todoService.create(input))
-  handle('todos:update', (id: number, patch: never) => todoService.update(id, patch))
-  handle('todos:toggle', (id: number, done: boolean) => todoService.toggle(id, done))
-  handle('todos:remove', (id: number) => todoService.remove(id))
-
-  /* ------------------------------ 重要事项 ------------------------------ */
-  handle('priorities:list', (date: string) => priorityService.list(date))
-  handle('priorities:create', (input: never) => priorityService.create(input))
-  handle('priorities:update', (id: number, patch: never) => priorityService.update(id, patch))
-  handle('priorities:toggle', (id: number, done: boolean) => priorityService.toggle(id, done))
-  handle('priorities:remove', (id: number) => priorityService.remove(id))
+  handle('schedules:reorder', (ids: number[]) => scheduleService.reorder(ids))
 
   /* ------------------------------ 习惯打卡 ------------------------------ */
   handle('habits:list', (date: string) => habitService.list(date))
@@ -142,4 +136,21 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
 
   /* -------------------------------- 天气 -------------------------------- */
   handle('weather:report', (force: boolean) => weatherService.report(force === true))
+
+  /* -------------------------------- 阅读 -------------------------------- */
+  handle('books:list', () => bookService.list())
+  handle('books:get', (id: number) => bookService.get(id))
+  handle('books:import', () => bookService.import(getMainWindow()))
+  handle('books:remove', (id: number) => bookService.remove(id))
+  handle('books:update-progress', (id: number, location: string, progress: number) =>
+    bookService.updateProgress(id, location, progress)
+  )
+  handle('books:update-meta', (id: number, patch: never) => bookService.updateMeta(id, patch))
+  handle('books:file', (id: number) => bookService.file(id))
+  handle('books:text', (id: number) => bookService.text(id))
+  handle('bookmarks:list', (bookId: number) => bookmarkService.list(bookId))
+  handle('bookmarks:create', (input: never) => bookmarkService.create(input))
+  handle('bookmarks:remove', (id: number) => bookmarkService.remove(id))
+  handle('reader:settings', () => settingsService.getReaderSettings())
+  handle('reader:set-settings', (value: never) => settingsService.setReaderSettings(value))
 }

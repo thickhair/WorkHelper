@@ -24,8 +24,11 @@
     "src/preload/*.d.ts",
     "src/shared/**/*",
     "tests/unit/views.test.ts",
+    "tests/unit/home-view.test.ts",
+    "tests/unit/calendar-view.test.ts",
     "tests/unit/sidebar.test.ts",
     "tests/unit/theme.test.ts",
+    "tests/unit/reader-view.test.ts",
     "tests/unit/assets-view.test.ts"
   ]
 }

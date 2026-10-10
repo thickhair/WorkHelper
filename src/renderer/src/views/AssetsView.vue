@@ -1021,49 +1021,6 @@ function planDesc(goal: SavingGoalWithProgress): string {
 </template>
 
 <style scoped>
-.page {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.page-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.head-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.head-icon {
-  width: 34px;
-  height: 34px;
-  border-radius: 11px;
-  background: linear-gradient(135deg, #f59e0b, #d97706);
-  color: #fff;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 4px 10px var(--brand-shadow);
-}
-
-.head-text h1 {
-  font-size: 16px;
-  font-weight: 800;
-}
-
-.head-text p {
-  font-size: 11.5px;
-  color: var(--text-3);
-  margin-top: 1px;
-}
-
 .head-actions {
   display: flex;
   align-items: center;
@@ -1647,7 +1604,7 @@ function planDesc(goal: SavingGoalWithProgress): string {
 /* ------------------------------ 平台选择 ------------------------------ */
 .platform-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fill, minmax(74px, 1fr));
   gap: 6px;
 }
 
@@ -1701,10 +1658,6 @@ function planDesc(goal: SavingGoalWithProgress): string {
 
   .pie-wrap {
     flex-direction: column;
-  }
-
-  .platform-grid {
-    grid-template-columns: repeat(3, 1fr);
   }
 }
 </style>

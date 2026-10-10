@@ -12,3 +12,6 @@ dist/
 .verify-data/
 .verify-shots/
 .eb-cache/
+
+# 本地规划/代理产物
+.trae/

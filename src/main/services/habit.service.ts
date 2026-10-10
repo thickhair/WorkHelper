@@ -53,9 +53,20 @@ export const habitService = {
     const current = this.get(id)
     if (!current) return null
     const next = { ...current, ...patch }
-    getDb()
-      .prepare('UPDATE habits SET name = ?, icon = ?, target = ? WHERE id = ?')
-      .run(next.name.trim(), next.icon || '✅', Math.max(1, next.target || 1), id)
+    const target = Math.max(1, next.target || 1)
+    const db = getDb()
+    db.prepare('UPDATE habits SET name = ?, icon = ?, target = ? WHERE id = ?').run(
+      next.name.trim(),
+      next.icon || '✅',
+      target,
+      id
+    )
+    // 目标下调时收敛该习惯的历史打卡记录，避免出现「5/3」类超目标显示
+    db.prepare('UPDATE habit_logs SET count = ? WHERE habit_id = ? AND count > ?').run(
+      target,
+      id,
+      target
+    )
     return this.get(id)
   },
 
@@ -65,7 +76,7 @@ export const habitService = {
 
   /**
    * 打卡增减：delta 为 +1 表示打卡一次，-1 表示撤销一次。
-   * 次数被限制在 [0, target*3] 区间内，返回最新进度。
+   * 次数被限制在 [0, target] 区间内（达到每日目标后不再增长），返回最新进度。
    */
   checkIn(id: number, date: string, delta: number): HabitWithProgress | null {
     const habit = this.get(id)
@@ -74,7 +85,7 @@ export const habitService = {
     const row = db
       .prepare('SELECT count FROM habit_logs WHERE habit_id = ? AND date = ?')
       .get(id, date) as { count: number } | undefined
-    const nextCount = Math.min(Math.max(Number(row?.count ?? 0) + delta, 0), habit.target * 3)
+    const nextCount = Math.min(Math.max(Number(row?.count ?? 0) + delta, 0), habit.target)
     if (row) {
       db.prepare('UPDATE habit_logs SET count = ? WHERE habit_id = ? AND date = ?').run(
         nextCount,

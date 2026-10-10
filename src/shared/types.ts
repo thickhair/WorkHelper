@@ -2,37 +2,34 @@
  * 共享类型定义：主进程（数据层 / IPC）与渲染进程共用。
  * 所有日期字段统一使用 `YYYY-MM-DD` 字符串，时间字段使用 `HH:mm` 字符串。
  */
+import type { ReaderFormat } from './reader'
 
-/** 日程（带固定时间的当日安排） */
+/** 日程（带可选时间的当日安排；未设置时间时 time 为空串，展示为「全天」） */
 export interface Schedule {
   id: number
   date: string
+  /** 时间 `HH:mm`；空串表示未设置时间（全天） */
   time: string
   title: string
   description: string
+  /** 颜色标记（见 shared/schedule-colors.ts）；空串表示不标记 */
+  color: string
+  /** 是否固定到清单顶部 */
+  pinned: boolean
   done: boolean
+  /** 完成时刻（本地时间字符串，未完成时为空） */
+  completedAt: string
   sortOrder: number
   createdAt: string
 }
 
-export type ScheduleInput = Omit<Schedule, 'id' | 'createdAt' | 'sortOrder'> & {
+export type ScheduleInput = Omit<
+  Schedule,
+  'id' | 'createdAt' | 'completedAt' | 'sortOrder' | 'color' | 'pinned'
+> & {
   sortOrder?: number
-}
-
-/** 待办事项 */
-export interface Todo {
-  id: number
-  date: string
-  title: string
-  startTime: string
-  endTime: string
-  done: boolean
-  sortOrder: number
-  createdAt: string
-}
-
-export type TodoInput = Omit<Todo, 'id' | 'createdAt' | 'sortOrder'> & {
-  sortOrder?: number
+  color?: string
+  pinned?: boolean
 }
 
 /** 习惯定义 */
@@ -54,26 +51,6 @@ export interface HabitInput {
 /** 习惯 + 指定日期的打卡进度 */
 export interface HabitWithProgress extends Habit {
   count: number
-}
-
-/** 重要事项优先级 */
-export type PriorityLevel = 'high' | 'medium' | 'low'
-
-/** 重要事项 */
-export interface PriorityTask {
-  id: number
-  date: string
-  title: string
-  startTime: string
-  endTime: string
-  priority: PriorityLevel
-  done: boolean
-  sortOrder: number
-  createdAt: string
-}
-
-export type PriorityInput = Omit<PriorityTask, 'id' | 'createdAt' | 'sortOrder'> & {
-  sortOrder?: number
 }
 
 /** 专注计时记录 */
@@ -225,6 +202,61 @@ export interface AssetCategoryStat {
   category: string
   amount: number
   count: number
+}
+
+/* ------------------------------ 阅读模块 ------------------------------ */
+
+/** 书籍格式（见 shared/reader.ts 的 ReaderFormat） */
+export type BookFormat = ReaderFormat
+
+/** 书籍（书籍文件复制到数据目录 books/ 子目录，本表保存元数据与阅读进度） */
+export interface Book {
+  id: number
+  title: string
+  author: string
+  /** 书籍格式（epub / pdf / txt / md） */
+  format: ReaderFormat
+  /** 存储文件名（位于数据目录 books/ 下） */
+  fileName: string
+  /** 文件大小（字节） */
+  fileSize: number
+  /** 封面（dataURL）；空串表示无封面，书架使用默认封面 */
+  cover: string
+  /** 阅读位置：EPUB 为 CFI，PDF 为页码，TXT / Markdown 为百分比（0-100）字符串 */
+  location: string
+  /** 阅读进度 0-100 */
+  progress: number
+  /** 最近阅读时间（YYYY-MM-DD HH:MM:SS）；空串表示未读 */
+  lastReadAt: string
+  createdAt: string
+}
+
+/** 书籍元数据更新（导入后在渲染层解析 EPUB / PDF 元数据后回写） */
+export interface BookMetaPatch {
+  title?: string
+  author?: string
+  cover?: string
+}
+
+/** 书签 */
+export interface Bookmark {
+  id: number
+  bookId: number
+  /** 定位：EPUB 为 CFI，PDF 为页码，文本为百分比（0-100） */
+  location: string
+  /** 展示名（章节名 / 页码 / 位置百分比） */
+  label: string
+  /** 位置百分比 0-100 */
+  percent: number
+  createdAt: string
+}
+
+/** 书签新增输入 */
+export interface BookmarkInput {
+  bookId: number
+  location: string
+  label: string
+  percent: number
 }
 
 /** 数据存储位置信息 */

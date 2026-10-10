@@ -1,21 +1,14 @@
 // @vitest-environment jsdom
 /**
- * 渲染层集成测试：挂载「每日计划」页面组件（mock window.api），
- * 验证数据加载、关键元素渲染与交互回调是否正确。
+ * 渲染层集成测试：挂载「首页」页面组件（mock window.api），
+ * 验证日程管理、习惯打卡与心情打卡等交互。
  */
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type {
-  HabitWithProgress,
-  PriorityTask,
-  Schedule,
-  ScheduleInput,
-  Todo
-} from '@shared/types'
+import type { HabitWithProgress, Schedule, ScheduleInput } from '@shared/types'
 import { addDays, formatDate } from '@shared/logic'
-import DailyPlanView from '../../src/renderer/src/views/DailyPlanView.vue'
 import HomeView from '../../src/renderer/src/views/HomeView.vue'
 
 const TODAY = formatDate(new Date())
@@ -27,9 +20,12 @@ const schedules: Schedule[] = [
     time: '07:00',
     title: '起床 + 早餐',
     description: '开启一天，元气满满',
+    color: '',
+    pinned: false,
     done: true,
+    completedAt: '2026-10-10 09:30:00',
     sortOrder: 0,
-    createdAt: ''
+    createdAt: '2026-10-10 08:00:00'
   },
   {
     id: 2,
@@ -37,35 +33,11 @@ const schedules: Schedule[] = [
     time: '09:30',
     title: '剪辑学习',
     description: '学习视频剪辑技巧',
+    color: '',
+    pinned: false,
     done: false,
+    completedAt: '',
     sortOrder: 1,
-    createdAt: ''
-  }
-]
-
-const todos: Todo[] = [
-  {
-    id: 11,
-    date: TODAY,
-    title: '背 50 个英语单词',
-    startTime: '08:00',
-    endTime: '09:00',
-    done: false,
-    sortOrder: 0,
-    createdAt: ''
-  }
-]
-
-const priorities: PriorityTask[] = [
-  {
-    id: 21,
-    date: TODAY,
-    title: '完成英语学习打卡',
-    startTime: '08:00',
-    endTime: '09:00',
-    priority: 'high',
-    done: false,
-    sortOrder: 0,
     createdAt: ''
   }
 ]
@@ -76,7 +48,6 @@ const habits: HabitWithProgress[] = [
 ]
 
 const toggleSchedule = vi.fn(async (id: number, done: boolean) => ({ ...schedules[0], id, done }))
-const toggleTodo = vi.fn(async (id: number, done: boolean) => ({ ...todos[0], id, done }))
 const checkIn = vi.fn(async (id: number) => ({ ...habits[0], id, count: 2 }))
 const setMood = vi.fn(async (date: string, mood: number | null) =>
   mood === null ? null : { date, mood, updatedAt: '' }
@@ -94,14 +65,8 @@ const apiMock = {
     create: vi.fn(async (input: ScheduleInput) => ({ ...schedules[0], ...input })),
     update: vi.fn(async () => schedules[0]),
     toggle: toggleSchedule,
-    remove: vi.fn(async () => undefined)
-  },
-  todos: {
-    list: vi.fn(async () => todos),
-    create: vi.fn(),
-    update: vi.fn(),
-    toggle: toggleTodo,
-    remove: vi.fn()
+    remove: vi.fn(async () => undefined),
+    reorder: vi.fn(async () => undefined)
   },
   habits: {
     list: vi.fn(async () => habits),
@@ -110,31 +75,22 @@ const apiMock = {
     remove: vi.fn(),
     checkIn
   },
-  priorities: {
-    list: vi.fn(async () => priorities),
-    create: vi.fn(),
-    update: vi.fn(),
-    toggle: vi.fn(),
-    remove: vi.fn()
-  },
   stats: {
     day: vi.fn(async () => ({
       date: TODAY,
       taskDone: 1,
-      taskTotal: 4,
+      taskTotal: 2,
       habitDone: 1,
       habitTotal: 2,
-      progress: 33,
-      statusLabel: '继续加油'
-    })),
-    trend: vi.fn(async () => [])
+      progress: 50,
+      statusLabel: '保持专注'
+    }))
   },
   birthdays: { list: vi.fn(async () => []) },
   moods: {
     range: vi.fn(async () => [...moodHistory]),
     set: setMood
-  },
-  focus: { create: vi.fn() }
+  }
 }
 
 beforeEach(() => {
@@ -148,82 +104,9 @@ const router = createRouter({
   history: createMemoryHistory(),
   routes: [
     { path: '/', component: { template: '<div />' } },
-    { path: '/plan', component: { template: '<div />' } },
     { path: '/calendar', component: { template: '<div />' } },
     { path: '/assets', component: { template: '<div />' } }
   ]
-})
-
-async function mountView(): Promise<ReturnType<typeof mount>> {
-  const wrapper = mount(DailyPlanView, {
-    global: {
-      plugins: [router],
-      stubs: { RouterLink: { template: '<a><slot /></a>' } }
-    }
-  })
-  await flushPromises()
-  return wrapper
-}
-
-describe('每日计划页面', () => {
-  it('挂载后加载当日数据并渲染各卡片', async () => {
-    const wrapper = await mountView()
-    const text = wrapper.text()
-
-    expect(apiMock.schedules.list).toHaveBeenCalled()
-    expect(apiMock.todos.list).toHaveBeenCalled()
-    expect(apiMock.habits.list).toHaveBeenCalled()
-    expect(apiMock.priorities.list).toHaveBeenCalled()
-
-    // 页面标题与问候语
-    expect(text).toContain('每日计划')
-    expect(text).toContain('起床 + 早餐')
-    expect(text).toContain('07:00')
-    expect(text).toContain('背 50 个英语单词')
-    expect(text).toContain('完成英语学习打卡')
-  })
-
-  it('统计卡片展示任务、习惯与进度数据', async () => {
-    const wrapper = await mountView()
-    const text = wrapper.text()
-    expect(text).toContain('1/4')
-    expect(text).toContain('1/2')
-    expect(text).toContain('33%')
-    expect(text).toContain('继续加油')
-  })
-
-  it('习惯打卡显示进度并可点击打卡', async () => {
-    const wrapper = await mountView()
-    expect(wrapper.text()).toContain('跑步')
-    expect(wrapper.text()).toContain('/1')
-
-    const rings = wrapper.findAll('.ring')
-    expect(rings.length).toBe(2)
-    await rings[0].trigger('click')
-    await flushPromises()
-    expect(checkIn).toHaveBeenCalledWith(31, TODAY, 1)
-  })
-
-  it('勾选日程会调用切换接口', async () => {
-    const wrapper = await mountView()
-    const checks = wrapper.findAll('.round-check')
-    // 第一条为未完成的「剪辑学习」日程（含勾选框）
-    await checks[0].trigger('click')
-    await flushPromises()
-    expect(toggleSchedule).toHaveBeenCalled()
-  })
-
-  it('「下一个任务」卡片展示推荐任务并提供开始按钮', async () => {
-    const wrapper = await mountView()
-    expect(wrapper.text()).toContain('下一个任务')
-    expect(wrapper.text()).toContain('剪辑学习')
-    const startBtn = wrapper.findAll('button').find((btn) => btn.text().includes('开始'))
-    expect(startBtn).toBeTruthy()
-    await startBtn!.trigger('click')
-    await flushPromises()
-    // 点击开始后出现专注计时器
-    expect(wrapper.find('.focus-timer').exists()).toBe(true)
-  })
 })
 
 /** 挂载首页（满足 RouterLink / useRouter 注入需求） */
@@ -237,6 +120,61 @@ async function mountHome(): Promise<ReturnType<typeof mount>> {
   await flushPromises()
   return wrapper
 }
+
+describe('首页习惯打卡', () => {
+  it('习惯面板展示进度并可点击圆环快速打卡', async () => {
+    const wrapper = await mountHome()
+    expect(wrapper.text()).toContain('习惯打卡')
+    expect(wrapper.text()).toContain('跑步')
+    expect(wrapper.text()).toContain('/1')
+
+    const rings = wrapper.findAll('.ring')
+    expect(rings.length).toBe(2)
+    await rings[0].trigger('click')
+    await flushPromises()
+    expect(checkIn).toHaveBeenCalledWith(31, TODAY, 1)
+  })
+})
+
+describe('习惯编辑弹窗（步进器与图标增强）', () => {
+  it('目标次数为自绘步进器（1–20 边界钳制），图标候选 30 个', async () => {
+    const wrapper = await mountHome()
+    const manageBtn = wrapper.findAll('button').find((btn) => btn.text().includes('管理'))!
+    await manageBtn.trigger('click')
+    await flushPromises()
+
+    // 管理弹窗通过 Teleport 渲染到 body：在弹窗内点击「新增习惯」
+    const manager = document.querySelectorAll('.modal')[0]
+    const addBtn = Array.from(manager.querySelectorAll<HTMLButtonElement>('button')).find((btn) =>
+      btn.textContent?.includes('新增习惯')
+    )!
+    addBtn.click()
+    await flushPromises()
+
+    // 编辑弹窗为最后打开的模态框
+    const modals = document.querySelectorAll('.modal')
+    const editModal = modals[modals.length - 1]
+    expect(editModal.textContent).toContain('添加习惯')
+    expect(editModal.querySelectorAll('.icon-pick')).toHaveLength(30)
+
+    const input = editModal.querySelector<HTMLInputElement>('.stepper-input')!
+    expect(input.value).toBe('1')
+    const buttons = editModal.querySelectorAll<HTMLButtonElement>('.stepper-btn')
+    // 最小值时「−」禁用
+    expect(buttons[0].disabled).toBe(true)
+
+    buttons[1].click()
+    await flushPromises()
+    expect(input.value).toBe('2')
+
+    buttons[0].click()
+    buttons[0].click()
+    await flushPromises()
+    // 撤销到 0 时钳制回 1
+    expect(input.value).toBe('1')
+    wrapper.unmount()
+  })
+})
 
 describe('首页心情打卡', () => {
   it('未打卡时提示打卡，点击后显示已打卡与连续打卡天数', async () => {
@@ -271,7 +209,7 @@ describe('首页心情打卡', () => {
 })
 
 describe('首页统计卡片跳转', () => {
-  it('四张统计卡片均为链接，点击后跳转到每日计划', async () => {
+  it('四张统计卡片均为链接，点击后跳转到日历数据看板', async () => {
     await router.push('/')
     const wrapper = mount(HomeView, { global: { plugins: [router] } })
     await flushPromises()
@@ -279,13 +217,13 @@ describe('首页统计卡片跳转', () => {
     const links = wrapper.findAll('a.stat-link')
     expect(links).toHaveLength(4)
     for (const link of links) {
-      expect(link.attributes('href')).toBe('/plan')
+      expect(link.attributes('href')).toBe('/calendar')
       expect(link.attributes('title')).toContain('详情')
     }
 
-    // 点击第一张卡片（今日任务）跳转到每日计划
+    // 点击第一张卡片（今日日程）跳转到日历
     await links[0].trigger('click')
     await flushPromises()
-    expect(router.currentRoute.value.path).toBe('/plan')
+    expect(router.currentRoute.value.path).toBe('/calendar')
   })
 })

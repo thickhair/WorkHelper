@@ -4,7 +4,7 @@
  * 更改时先把数据复制到新目录再切换（原目录文件保留，作为兜底备份）。
  */
 import { app, dialog, type BrowserWindow } from 'electron'
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import {
   closeDb,
@@ -113,6 +113,11 @@ export const storageService = {
       for (const suffix of DB_SUFFIXES) {
         const from = `${sourceDb}${suffix}`
         if (existsSync(from)) copyFileSync(from, `${targetDb}${suffix}`)
+      }
+      // 书籍文件（阅读模块）随数据目录一并迁移
+      const sourceBooks = join(previousDir, 'books')
+      if (existsSync(sourceBooks)) {
+        cpSync(sourceBooks, join(targetDir, 'books'), { recursive: true })
       }
     } catch (err) {
       // 复制失败：回退到原位置，保证应用可继续使用

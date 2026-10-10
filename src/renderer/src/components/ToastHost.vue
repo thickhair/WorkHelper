@@ -62,7 +62,7 @@ const toast = useToastStore()
 
 .toast-enter-active,
 .toast-leave-active {
-  transition: all 0.22s ease;
+  transition: all var(--dur-2) var(--ease-std);
 }
 
 .toast-enter-from,

@@ -8,7 +8,13 @@ import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Anniversary } from '@shared/anniversaries'
-import type { Birthday, BirthdayInput, Schedule, ScheduleInput } from '@shared/types'
+import type {
+  Birthday,
+  BirthdayInput,
+  HabitWithProgress,
+  Schedule,
+  ScheduleInput
+} from '@shared/types'
 import { addDays, formatDate, monthDayLabel, parseDate } from '@shared/logic'
 import CalendarView from '../../src/renderer/src/views/CalendarView.vue'
 
@@ -25,10 +31,19 @@ const schedules: Schedule[] = [
     time: '09:00',
     title: '产品评审会',
     description: '与设计确认交互稿',
+    color: '',
+    pinned: false,
     done: false,
+    completedAt: '',
     sortOrder: 0,
     createdAt: ''
   }
+]
+
+/** 选中日的习惯打卡记录（供当日详情展示） */
+const habits: HabitWithProgress[] = [
+  { id: 31, name: '跑步', icon: '🏃', target: 1, sortOrder: 0, archived: false, count: 1 },
+  { id: 32, name: '多喝水', icon: '💧', target: 2, sortOrder: 1, archived: false, count: 1 }
 ]
 
 const birthdays: Birthday[] = [
@@ -91,9 +106,32 @@ const weatherDays = Array.from({ length: 7 }, (_, i) => ({
 
 const apiMock = {
   schedules: {
-    range: vi.fn(async () => schedules),
+    // 返回副本：勾选会直接修改列表项状态，避免污染模块级夹具
+    range: vi.fn(async () => schedules.map((item) => ({ ...item }))),
     create: createSchedule,
     toggle: toggleSchedule
+  },
+  habits: {
+    list: vi.fn(async () => habits)
+  },
+  stats: {
+    day: vi.fn(async () => ({
+      date: TODAY,
+      taskDone: 1,
+      taskTotal: 1,
+      habitDone: 1,
+      habitTotal: 2,
+      progress: 67,
+      statusLabel: '保持专注'
+    })),
+    // 近 7 天趋势（含今天）
+    trend: vi.fn(async () =>
+      Array.from({ length: 7 }, (_, i) => ({
+        date: addDays(TODAY, i - 6),
+        taskDone: i % 3,
+        taskTotal: 3
+      }))
+    )
   },
   birthdays: {
     list: vi.fn(async () => [...birthdays]),
@@ -182,7 +220,38 @@ describe('日历页面', () => {
     expect(wrapper.text()).toContain('产品评审会')
     expect(wrapper.find('.dot.sched').exists()).toBe(true)
 
-    await wrapper.find('.round-check').trigger('click')
+    // 定位「产品评审会」所在行后点击勾选
+    const row = wrapper.findAll('.row').find((item) => item.text().includes('产品评审会'))
+    expect(row).toBeTruthy()
+    await row!.find('.round-check').trigger('click')
+    await flushPromises()
+    expect(toggleSchedule).toHaveBeenCalledWith(1, true)
+  })
+
+  it('当日详情展示日程清单、习惯打卡记录与完成率', async () => {
+    const wrapper = await mountView()
+    const text = wrapper.text()
+
+    // 日程：时间、描述与勾选（不再有类型徽章 / 优先级标识）
+    expect(text).toContain('产品评审会')
+    expect(text).toContain('09:00')
+    expect(text).toContain('与设计确认交互稿')
+    expect(wrapper.find('.kind-tag').exists()).toBe(false)
+    expect(wrapper.find('.priority-dot').exists()).toBe(false)
+
+    // 习惯：打卡记录与达标情况
+    expect(text).toContain('习惯打卡')
+    expect(text).toContain('跑步')
+    expect(text).toContain('1/2')
+
+    // 完成率：进度条与日程 / 习惯明细
+    expect(text).toContain('67%')
+    expect(text).toContain('日程 1/1')
+
+    // 勾选日程行调用日程切换接口
+    const row = wrapper.findAll('.row').find((item) => item.text().includes('产品评审会'))
+    expect(row).toBeTruthy()
+    await row!.find('.round-check').trigger('click')
     await flushPromises()
     expect(toggleSchedule).toHaveBeenCalledWith(1, true)
   })
@@ -244,6 +313,44 @@ describe('日历页面', () => {
     await buttons[1].trigger('click')
     await flushPromises()
     expect(setMood).toHaveBeenCalledWith(TODAY, 2)
+  })
+})
+
+describe('日历数据看板', () => {
+  it('展示四张指标卡、完成率环与近 7 天趋势', async () => {
+    const wrapper = await mountView()
+    const text = wrapper.text()
+
+    expect(apiMock.stats.trend).toHaveBeenCalledWith(7)
+    expect(text).toContain('数据看板')
+    expect(text).toContain('日程总数')
+    expect(text).toContain('已完成')
+    expect(text).toContain('完成率')
+    expect(text).toContain('平均完成耗时')
+    expect(wrapper.findAll('.stat-card')).toHaveLength(4)
+
+    // 选中日（今天）仅 1 项未完成日程：环形图展示 0/1 项完成
+    expect(wrapper.find('.donut').exists()).toBe(true)
+    expect(text).toContain('0/1 项完成')
+    expect(text).toContain('今日完成率')
+    expect(text).toContain('近 7 天完成趋势')
+    // 无有效完成时刻样本时平均耗时显示「—」
+    const avgCard = wrapper
+      .findAll('.stat-card')
+      .find((card) => card.text().includes('平均完成耗时'))!
+    expect(avgCard.find('.stat-value').text()).toBe('—')
+  })
+
+  it('勾选日程后刷新近 7 天趋势数据', async () => {
+    const wrapper = await mountView()
+    expect(apiMock.stats.trend).toHaveBeenCalledTimes(1)
+
+    const row = wrapper.findAll('.row').find((item) => item.text().includes('产品评审会'))
+    await row!.find('.round-check').trigger('click')
+    await flushPromises()
+
+    expect(toggleSchedule).toHaveBeenCalledWith(1, true)
+    expect(apiMock.stats.trend).toHaveBeenCalledTimes(2)
   })
 })
 

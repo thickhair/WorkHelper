@@ -1,12 +1,21 @@
 <script setup lang="ts">
 /**
  * 日历页：未来一周天气（自动定位）、月视图（公历 / 农历 / 节气 / 传统节日 /
- * 法定节假日与调休 / 每日心情）、选中日详情（农历、干支、节日、心情、日程），
- * 生日与「倒数日 / 纪念日」管理。右键点击任意日期可弹出功能菜单
- * （添加生日 / 添加日程 / 倒数日 / 纪念日）。
+ * 法定节假日与调休 / 每日心情）、选中日详情（农历、干支、节日、心情、
+ * 当日日程与完成状态、习惯打卡记录、完成率）、数据看板（选中日指标 +
+ * 完成率环 + 近 7 天趋势），生日与「倒数日 / 纪念日」管理。
+ * 右键点击任意日期可弹出功能菜单（添加生日 / 添加日程 / 倒数日 / 纪念日）。
  */
 import { computed, onMounted, ref, watch } from 'vue'
-import type { Birthday, BirthdayInput, MoodRecord, Schedule } from '@shared/types'
+import type {
+  Birthday,
+  BirthdayInput,
+  DayStats,
+  HabitWithProgress,
+  MoodRecord,
+  Schedule,
+  TrendPoint
+} from '@shared/types'
 import {
   daysUntilOccurrence,
   nextOccurrence,
@@ -28,12 +37,25 @@ import {
 } from '@shared/calendar'
 import { moodEmoji, moodLabel } from '@shared/moods'
 import type { WeatherResult } from '@shared/weather'
-import { formatDate, monthDayLabel, parseDate, weekdayLabel } from '@shared/logic'
+import {
+  averageCompletionMinutes,
+  formatDate,
+  formatMinutes,
+  monthDayLabel,
+  parseDate,
+  percent,
+  sortDaySchedules,
+  weekdayLabel
+} from '@shared/logic'
 import { useToastStore } from '../stores/toast'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
+import DonutChart from '../components/DonutChart.vue'
 import Icon from '../components/Icon.vue'
+import MiniBarChart from '../components/MiniBarChart.vue'
 import ModalDialog from '../components/ModalDialog.vue'
 import MoodPicker from '../components/MoodPicker.vue'
+import ScheduleColorPicker from '../components/ScheduleColorPicker.vue'
+import StatCard from '../components/StatCard.vue'
 
 const toast = useToastStore()
 
@@ -49,6 +71,11 @@ const schedules = ref<Schedule[]>([])
 const birthdays = ref<Birthday[]>([])
 const anniversaries = ref<Anniversary[]>([])
 const moods = ref<MoodRecord[]>([])
+/** 选中日的习惯记录与统计（选中日期变化时按需加载） */
+const dayHabits = ref<HabitWithProgress[]>([])
+const dayStats = ref<DayStats | null>(null)
+/** 近 7 天趋势（数据看板） */
+const trends = ref<TrendPoint[]>([])
 const weather = ref<WeatherResult | null>(null)
 const weatherError = ref('')
 const weatherLoading = ref(false)
@@ -58,6 +85,7 @@ onMounted(() => {
   void loadBirthdays()
   void loadAnniversaries()
   void loadWeather()
+  void loadTrends()
 })
 
 /* ------------------------------ 数据加载 ------------------------------ */
@@ -84,6 +112,25 @@ async function loadMonth(): Promise<void> {
     toast.error((err as Error).message)
   }
 }
+
+/** 加载选中日的习惯打卡记录与统计 */
+async function loadSelectedDay(): Promise<void> {
+  const date = selected.value
+  try {
+    const [habits, stats] = await Promise.all([
+      window.api.habits.list(date),
+      window.api.stats.day(date)
+    ])
+    // 快速切换日期时丢弃过期响应
+    if (selected.value !== date) return
+    dayHabits.value = habits
+    dayStats.value = stats
+  } catch (err) {
+    toast.error((err as Error).message)
+  }
+}
+
+watch(selected, () => void loadSelectedDay(), { immediate: true })
 
 /** 获取未来一周天气（force 为 true 时强制刷新） */
 async function loadWeather(force = false): Promise<void> {
@@ -271,6 +318,16 @@ const selectedLabel = computed(
   () => `${parseDate(selected.value).getFullYear()}年${monthDayLabel(selected.value)} ${weekdayLabel(selected.value)}`
 )
 
+/** 选中日日程清单（未完成在前、置顶优先、时间升序） */
+const selectedDaySchedules = computed(() => sortDaySchedules(selectedSchedules.value))
+const selectedTaskDone = computed(() => selectedDaySchedules.value.filter((item) => item.done).length)
+/** 已达标习惯数（count ≥ target） */
+const selectedHabitDone = computed(
+  () => dayHabits.value.filter((item) => item.count >= item.target).length
+)
+/** 当日整体完成率（日程 + 习惯加权，来自统计数据） */
+const selectedProgress = computed(() => dayStats.value?.progress ?? 0)
+
 /** 记录 / 修改选中日心情（value 为 null 表示取消记录） */
 async function setMood(value: number | null): Promise<void> {
   const date = selected.value
@@ -284,14 +341,74 @@ async function setMood(value: number | null): Promise<void> {
   }
 }
 
-async function toggleSchedule(item: Schedule): Promise<void> {
+/** 勾选 / 取消勾选当日日程，并刷新完成率统计与数据看板 */
+async function toggleDayTask(item: Schedule): Promise<void> {
+  const done = !item.done
   try {
-    await window.api.schedules.toggle(item.id, !item.done)
-    item.done = !item.done
+    await window.api.schedules.toggle(item.id, done)
+    const target = schedules.value.find((one) => one.id === item.id)
+    if (target) target.done = done
+    dayStats.value = await window.api.stats.day(selected.value)
+    void loadTrends()
   } catch (err) {
     toast.error((err as Error).message)
   }
 }
+
+/* ------------------------------ 数据看板 ------------------------------ */
+
+async function loadTrends(): Promise<void> {
+  try {
+    trends.value = await window.api.stats.trend(7)
+  } catch (err) {
+    toast.error((err as Error).message)
+  }
+}
+
+const dashTotal = computed(() => selectedDaySchedules.value.length)
+const dashDone = computed(() => selectedTaskDone.value)
+const dashPercent = computed(() => percent(dashDone.value, dashTotal.value))
+
+/** 平均完成耗时（分钟）：仅统计记录到完成时刻的日程，无有效样本显示「—」 */
+const dashAvgText = computed(() => {
+  const minutes = averageCompletionMinutes(selectedDaySchedules.value)
+  return minutes === null ? '—' : formatMinutes(minutes)
+})
+
+const dashCards = computed(() => [
+  {
+    icon: '📋',
+    label: '日程总数',
+    value: `${dashTotal.value}`,
+    tag: '项',
+    tone: 'green' as const
+  },
+  {
+    icon: '✅',
+    label: '已完成',
+    value: `${dashDone.value}`,
+    tag: '项',
+    tone: 'blue' as const
+  },
+  {
+    icon: '📈',
+    label: '完成率',
+    value: `${dashPercent.value}%`,
+    tag: '',
+    tone: 'green' as const
+  },
+  {
+    icon: '⏱️',
+    label: '平均完成耗时',
+    value: dashAvgText.value,
+    tag: '当日平均',
+    tone: 'yellow' as const
+  }
+])
+
+const trendPoints = computed(() =>
+  trends.value.map((item) => ({ date: item.date, done: item.taskDone, total: item.taskTotal }))
+)
 
 /* ------------------------------ 生日管理 ------------------------------ */
 
@@ -457,10 +574,17 @@ function menuAction(action: 'birthday' | 'schedule' | 'countdown' | 'anniversary
 
 /* ------------------------------ 添加日程 ------------------------------ */
 
-const scheduleDialog = ref({ visible: false, date: '', time: '09:00', title: '', description: '' })
+const scheduleDialog = ref({
+  visible: false,
+  date: '',
+  time: '',
+  color: '',
+  title: '',
+  description: ''
+})
 
 function openScheduleCreate(date: string): void {
-  scheduleDialog.value = { visible: true, date, time: '09:00', title: '', description: '' }
+  scheduleDialog.value = { visible: true, date, time: '', color: '', title: '', description: '' }
 }
 
 async function saveSchedule(): Promise<void> {
@@ -470,17 +594,24 @@ async function saveSchedule(): Promise<void> {
     toast.error('请填写日程标题')
     return
   }
-  const time = /^([01]?\d|2[0-3]):[0-5]\d$/.test(form.time.trim()) ? form.time.trim() : '09:00'
+  // 时间选填：留空表示全天；填写时必须是 HH:mm 格式
+  const rawTime = form.time.trim()
+  if (rawTime && !/^([01]?\d|2[0-3]):[0-5]\d$/.test(rawTime)) {
+    toast.error('时间格式应为 HH:mm（如 09:30），留空表示全天')
+    return
+  }
   try {
     await window.api.schedules.create({
       date: form.date,
-      time,
+      time: rawTime,
       title,
       description: form.description.trim(),
+      color: form.color,
       done: false
     })
     scheduleDialog.value.visible = false
     await loadMonth()
+    void loadTrends()
     toast.success(`已添加 ${monthDayLabel(form.date)} 的日程`)
   } catch (err) {
     toast.error((err as Error).message)
@@ -759,16 +890,23 @@ function anniversarySub(item: (typeof anniversaryItems.value)[number]): string {
           <MoodPicker :model-value="selectedMood" size="sm" @update:model-value="setMood" />
 
           <div class="section-title">
-            <span><Icon name="clock" :size="13" />日程</span>
-            <span class="card-sub">{{ selectedSchedules.length }} 项</span>
+            <span><Icon name="list" :size="13" />日程</span>
+            <span class="card-sub">{{ selectedTaskDone }}/{{ selectedDaySchedules.length }} 完成</span>
           </div>
-          <div v-if="selectedSchedules.length === 0" class="empty slim">
-            <Icon name="clock" :size="20" />
+          <div v-if="selectedDaySchedules.length === 0" class="empty slim">
+            <Icon name="list" :size="20" />
             <span>这一天没有日程安排</span>
           </div>
           <div v-else class="row-list">
-            <div v-for="item in selectedSchedules" :key="item.id" class="row">
-              <span class="row-time">{{ item.time }}</span>
+            <div
+              v-for="item in selectedDaySchedules"
+              :key="item.id"
+              class="row"
+              :style="item.color ? { boxShadow: `inset 3px 0 0 ${item.color}` } : undefined"
+            >
+              <span class="row-time" :class="{ 'all-day': !item.time }">
+                {{ item.time || '全天' }}
+              </span>
               <div class="row-main">
                 <span class="row-title" :class="{ strike: item.done }">{{ item.title }}</span>
                 <span v-if="item.description" class="row-desc">{{ item.description }}</span>
@@ -777,12 +915,42 @@ function anniversarySub(item: (typeof anniversaryItems.value)[number]): string {
                 class="round-check"
                 :class="{ checked: item.done }"
                 :title="item.done ? '标记为未完成' : '标记为完成'"
-                @click="toggleSchedule(item)"
+                @click="toggleDayTask(item)"
               >
                 <Icon name="check" :size="11" />
               </button>
             </div>
           </div>
+
+          <div class="section-title">
+            <span><Icon name="fire" :size="13" />习惯打卡</span>
+            <span class="card-sub">{{ selectedHabitDone }}/{{ dayHabits.length }} 已达标</span>
+          </div>
+          <div v-if="dayHabits.length === 0" class="empty slim">
+            <Icon name="fire" :size="20" />
+            <span>暂无习惯记录</span>
+          </div>
+          <div v-else class="row-list">
+            <div v-for="habit in dayHabits" :key="habit.id" class="row">
+              <span class="habit-emoji">{{ habit.icon }}</span>
+              <span class="row-title habit-row-name">{{ habit.name }}</span>
+              <span class="tag" :class="habit.count >= habit.target ? 'tag-blue' : 'tag-plain'">
+                {{ habit.count }}/{{ habit.target }}
+              </span>
+            </div>
+          </div>
+
+          <div class="section-title">
+            <span><Icon name="chart" :size="13" />完成率</span>
+            <span class="card-sub">{{ selectedProgress }}%</span>
+          </div>
+          <div class="bar-track">
+            <span class="bar-fill" :style="{ width: `${selectedProgress}%` }"></span>
+          </div>
+          <p class="progress-note">
+            日程 {{ dayStats?.taskDone ?? 0 }}/{{ dayStats?.taskTotal ?? 0 }} · 习惯
+            {{ dayStats?.habitDone ?? 0 }}/{{ dayStats?.habitTotal ?? 0 }}
+          </p>
 
           <template v-if="selectedBirthdays.length > 0">
             <div class="section-title">
@@ -901,6 +1069,40 @@ function anniversarySub(item: (typeof anniversaryItems.value)[number]): string {
       </div>
     </section>
 
+    <!-- 数据看板（选中日指标 + 完成率环 + 近 7 天趋势） -->
+    <section class="card">
+      <div class="card-header">
+        <span class="card-title"><Icon name="chart" :size="15" />数据看板</span>
+        <span class="card-sub">{{ selectedLabel }} 完成情况与近 7 天趋势</span>
+      </div>
+
+      <div class="stat-row">
+        <StatCard
+          v-for="card in dashCards"
+          :key="card.label"
+          :icon="card.icon"
+          :label="card.label"
+          :value="card.value"
+          :tag="card.tag"
+          :tone="card.tone"
+        />
+      </div>
+
+      <div class="dash-grid">
+        <div class="dash-ring">
+          <DonutChart :percent="dashPercent" :sub="`${dashDone}/${dashTotal} 项完成`" />
+          <span class="dash-ring-label">{{ selected === today ? '今日完成率' : '当日完成率' }}</span>
+        </div>
+        <div class="dash-trend">
+          <div class="dash-bar-head">
+            <span class="dash-bar-label">近 7 天完成趋势</span>
+            <span class="card-sub">深色为已完成</span>
+          </div>
+          <MiniBarChart :points="trendPoints" :height="140" />
+        </div>
+      </div>
+    </section>
+
     <!-- 生日编辑弹窗 -->
     <ModalDialog
       :visible="dialog.visible"
@@ -988,8 +1190,13 @@ function anniversarySub(item: (typeof anniversaryItems.value)[number]): string {
     >
       <div class="field-row">
         <label class="field">
-          <span class="field-label">时间</span>
-          <input v-model="scheduleDialog.time" class="input" placeholder="09:00" maxlength="5" />
+          <span class="field-label">时间（选填）</span>
+          <input
+            v-model="scheduleDialog.time"
+            class="input"
+            placeholder="留空表示全天"
+            maxlength="5"
+          />
         </label>
         <label class="field grow">
           <span class="field-label">标题</span>
@@ -1009,6 +1216,10 @@ function anniversarySub(item: (typeof anniversaryItems.value)[number]): string {
           placeholder="选填"
           maxlength="60"
         />
+      </label>
+      <label class="field">
+        <span class="field-label">颜色标记</span>
+        <ScheduleColorPicker v-model="scheduleDialog.color" />
       </label>
       <template #footer>
         <button class="btn btn-plain" @click="scheduleDialog.visible = false">取消</button>
@@ -1110,49 +1321,6 @@ function anniversarySub(item: (typeof anniversaryItems.value)[number]): string {
 </template>
 
 <style scoped>
-.page {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.page-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.head-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.head-icon {
-  width: 34px;
-  height: 34px;
-  border-radius: 11px;
-  background: linear-gradient(135deg, var(--green-500), var(--green-600));
-  color: #fff;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 4px 10px var(--brand-shadow);
-}
-
-.head-text h1 {
-  font-size: 16px;
-  font-weight: 800;
-}
-
-.head-text p {
-  font-size: 11.5px;
-  color: var(--text-3);
-  margin-top: 1px;
-}
-
 .date-nav {
   display: flex;
   align-items: center;
@@ -1495,6 +1663,45 @@ function anniversarySub(item: (typeof anniversaryItems.value)[number]): string {
   font-size: 12.5px;
   font-weight: 800;
   color: var(--green-600);
+  font-variant-numeric: tabular-nums;
+}
+
+.row-time.all-day {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-3);
+}
+
+/* 习惯记录行 */
+.habit-emoji {
+  font-size: 15px;
+  flex: none;
+}
+
+.habit-row-name {
+  flex: 1;
+}
+
+/* 完成率进度条 */
+.bar-track {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--green-100);
+  overflow: hidden;
+}
+
+.bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--green-400), var(--green-600));
+  transition: width var(--dur-3) var(--ease-std);
+}
+
+.progress-note {
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--text-3);
 }
 
 .row-main {
@@ -1716,9 +1923,68 @@ function anniversarySub(item: (typeof anniversaryItems.value)[number]): string {
   box-shadow: var(--shadow-card);
 }
 
+/* ------------------------------ 数据看板 ------------------------------ */
+.stat-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.dash-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 220px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: center;
+  margin-top: 18px;
+}
+
+.dash-ring {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.dash-ring-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.dash-bar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.dash-bar-label {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-1);
+}
+
 /* ------------------------------ 响应式 ------------------------------ */
 @media (max-width: 1160px) {
   .cal-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 900px) {
+  .dash-grid {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+  }
+
+  .dash-trend {
+    width: 100%;
+  }
+}
+
+@media (max-width: 560px) {
+  .stat-row {
     grid-template-columns: minmax(0, 1fr);
   }
 }

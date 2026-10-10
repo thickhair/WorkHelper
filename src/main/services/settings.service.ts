@@ -6,6 +6,7 @@ import { app, dialog, shell } from 'electron'
 import { readFileSync, writeFileSync } from 'fs'
 import { getDataDir, getDb, getDbDriver, getDbPath } from '../db/database'
 import { DEFAULT_SIDEBAR, normalizeSidebar } from '@shared/features'
+import { normalizeReaderSettings, type ReaderSettings } from '@shared/reader'
 import { normalizeTheme } from '@shared/themes'
 import type { AppSettings, BackupPayload } from '@shared/types'
 
@@ -13,18 +14,18 @@ import type { AppSettings, BackupPayload } from '@shared/types'
 const BACKUP_TABLES: Record<string, string[]> = {
   habits: ['id', 'name', 'icon', 'target', 'sort_order', 'archived'],
   habit_logs: ['id', 'habit_id', 'date', 'count'],
-  schedules: ['id', 'date', 'time', 'title', 'description', 'done', 'sort_order', 'created_at'],
-  todos: ['id', 'date', 'title', 'start_time', 'end_time', 'done', 'sort_order', 'created_at'],
-  priorities: [
+  schedules: [
     'id',
     'date',
+    'time',
     'title',
-    'start_time',
-    'end_time',
-    'priority',
+    'description',
+    'color',
+    'pinned',
     'done',
     'sort_order',
-    'created_at'
+    'created_at',
+    'completed_at'
   ],
   focus_logs: ['id', 'date', 'title', 'minutes', 'created_at'],
   birthdays: ['id', 'name', 'calendar', 'month', 'day', 'remind_days', 'note', 'created_at'],
@@ -34,6 +35,20 @@ const BACKUP_TABLES: Record<string, string[]> = {
   asset_records: ['id', 'account_id', 'kind', 'category', 'amount', 'date', 'note', 'created_at'],
   saving_goals: ['id', 'kind', 'name', 'target', 'period', 'per_amount', 'start_date', 'note', 'done', 'created_at'],
   saving_deposits: ['id', 'goal_id', 'amount', 'date', 'note', 'created_at'],
+  books: [
+    'id',
+    'title',
+    'author',
+    'format',
+    'file_name',
+    'file_size',
+    'cover',
+    'location',
+    'progress',
+    'last_read_at',
+    'created_at'
+  ],
+  bookmarks: ['id', 'book_id', 'location', 'label', 'percent', 'created_at'],
   settings: ['key', 'value']
 }
 
@@ -69,6 +84,33 @@ export const settingsService = {
       db.prepare("UPDATE settings SET value = ? WHERE key = 'theme'").run(normalized)
     } else {
       db.prepare("INSERT INTO settings (key, value) VALUES ('theme', ?)").run(normalized)
+    }
+    return normalized
+  },
+
+  /** 读取阅读设置（无配置或格式错误时回退默认值） */
+  getReaderSettings(): ReaderSettings {
+    const row = getDb().prepare("SELECT value FROM settings WHERE key = 'readerSettings'").get() as
+      | { value: string }
+      | undefined
+    if (!row) return normalizeReaderSettings(null)
+    try {
+      return normalizeReaderSettings(JSON.parse(row.value))
+    } catch {
+      return normalizeReaderSettings(null)
+    }
+  },
+
+  /** 保存阅读设置，返回规范化后的结果 */
+  setReaderSettings(value: ReaderSettings): ReaderSettings {
+    const normalized = normalizeReaderSettings(value)
+    const db = getDb()
+    const json = JSON.stringify(normalized)
+    const exists = db.prepare("SELECT 1 AS ok FROM settings WHERE key = 'readerSettings'").get()
+    if (exists) {
+      db.prepare("UPDATE settings SET value = ? WHERE key = 'readerSettings'").run(json)
+    } else {
+      db.prepare("INSERT INTO settings (key, value) VALUES ('readerSettings', ?)").run(json)
     }
     return normalized
   },
@@ -169,7 +211,8 @@ export const settingsService = {
         const stmt = db.prepare(
           `INSERT OR REPLACE INTO ${table} (${columns.join(', ')}) VALUES (${placeholders})`
         )
-        rows.forEach((row) => stmt.run(...columns.map((col) => row[col] as never)))
+        // 旧版备份可能缺少新增列（如 completed_at），缺失时写入 NULL 兼容
+        rows.forEach((row) => stmt.run(...columns.map((col) => (row[col] ?? null) as never)))
       })
       db.exec('COMMIT')
     } catch (err) {

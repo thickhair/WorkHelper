@@ -1,21 +1,33 @@
 <script setup lang="ts">
 /**
- * 首页仪表盘：今日概览、问候卡片、日程与待办速览、近 7 天趋势与快捷入口。
+ * 首页仪表盘：今日概览、今日日程管理（增删改 / 置顶 / 拖拽排序 / 颜色标记）、
+ * 习惯与心情打卡与快捷入口。
+ * 每日计划页已整合进本页，统计看板迁移至日历页。
  */
 import { computed, onMounted, ref } from 'vue'
-import type { AssetsSummary, Birthday, MoodRecord, TrendPoint } from '@shared/types'
+import type { AssetsSummary, Birthday, MoodRecord, Schedule } from '@shared/types'
+import { formatMoney } from '@shared/assets'
 import { birthdayDateLabel, daysUntilBirthday } from '@shared/calendar'
 import { featureByRoute } from '@shared/features'
-import { formatMoney } from '@shared/assets'
-import { moodLabel, moodStreak } from '@shared/moods'
-import { addDays, formatDate, greetingByHour, monthDayLabel, weekdayLabel } from '@shared/logic'
+import {
+  addDays,
+  formatDate,
+  greetingByHour,
+  monthDayLabel,
+  moveSchedule,
+  sortDaySchedules,
+  weekdayLabel
+} from '@shared/logic'
+import { moodEmoji, moodLabel, moodStreak } from '@shared/moods'
 import { useAppStore } from '../stores/app'
 import { usePlanStore } from '../stores/plan'
 import { useSidebarStore } from '../stores/sidebar'
 import { useToastStore } from '../stores/toast'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
+import HabitPanel from '../components/HabitPanel.vue'
 import Icon from '../components/Icon.vue'
-import MiniBarChart from '../components/MiniBarChart.vue'
 import MoodPicker from '../components/MoodPicker.vue'
+import ScheduleEditDialog, { ScheduleFormValue } from '../components/ScheduleEditDialog.vue'
 import StatCard from '../components/StatCard.vue'
 
 const appStore = useAppStore()
@@ -24,7 +36,6 @@ const sidebarStore = useSidebarStore()
 const toast = useToastStore()
 
 const today = formatDate(new Date())
-const trends = ref<TrendPoint[]>([])
 const birthdays = ref<Birthday[]>([])
 /** 近一年心情记录（用于连续打卡统计） */
 const moodRecords = ref<MoodRecord[]>([])
@@ -36,12 +47,10 @@ const showAssets = ref(false)
 onMounted(async () => {
   try {
     await planStore.load(today)
-    const [trendData, birthdayData, moodData] = await Promise.all([
-      window.api.stats.trend(7),
+    const [birthdayData, moodData] = await Promise.all([
       window.api.birthdays.list(),
       window.api.moods.range(addDays(today, -366), today)
     ])
-    trends.value = trendData
     birthdays.value = birthdayData
     moodRecords.value = moodData
     todayMood.value = moodData.find((item) => item.date === today)?.mood ?? null
@@ -52,6 +61,8 @@ onMounted(async () => {
     toast.error((err as Error).message)
   }
 })
+
+/* ------------------------------ 心情打卡 ------------------------------ */
 
 /** 一键记录今日心情（再次点击当前心情 = 取消记录） */
 async function setMood(value: number | null): Promise<void> {
@@ -72,6 +83,8 @@ const moodStreakDays = computed(() => {
   return moodStreak(dates, today)
 })
 
+/* ------------------------------ 页头与统计 ------------------------------ */
+
 const greeting = computed(() => greetingByHour(new Date().getHours()))
 const dateText = computed(() => `${monthDayLabel(today)} ${weekdayLabel(today)}`)
 
@@ -80,9 +93,9 @@ const statCards = computed(() => {
   return [
     {
       icon: '🎯',
-      label: '今日任务',
+      label: '今日日程',
       value: `${s?.taskDone ?? 0}/${s?.taskTotal ?? 0}`,
-      tag: '任务',
+      tag: '日程',
       tone: 'green' as const
     },
     {
@@ -109,16 +122,167 @@ const statCards = computed(() => {
   ]
 })
 
-const topSchedules = computed(() => planStore.schedules.slice(0, 5))
-const topTodos = computed(() => planStore.todos.slice(0, 5))
+/* ------------------------------ 今日日程管理 ------------------------------ */
 
-/** 近 7 天任务完成数据（供迷你柱状图使用） */
-const trendPoints = computed(() =>
-  trends.value.map((t) => ({ date: t.date, done: t.taskDone, total: t.taskTotal }))
-)
+const daySchedules = computed(() => sortDaySchedules(planStore.schedules))
+const pendingCount = computed(() => daySchedules.value.filter((item) => !item.done).length)
+
+async function toggleTask(item: Schedule): Promise<void> {
+  try {
+    await planStore.toggleSchedule(item.id, !item.done)
+  } catch (err) {
+    toast.error((err as Error).message)
+  }
+}
+
+function removeTask(item: Schedule): void {
+  askRemove(`确定删除日程「${item.title}」吗？`, () => planStore.removeSchedule(item.id))
+}
+
+/* ------------------------------ 日程弹窗 ------------------------------ */
+
+const dialog = ref<{
+  visible: boolean
+  editingId: number | null
+  initial?: Partial<ScheduleFormValue>
+}>({ visible: false, editingId: null, initial: undefined })
+
+function openCreate(): void {
+  dialog.value = { visible: true, editingId: null, initial: undefined }
+}
+
+function openEdit(item: Schedule): void {
+  dialog.value = {
+    visible: true,
+    editingId: item.id,
+    initial: {
+      time: item.time,
+      title: item.title,
+      description: item.description,
+      color: item.color
+    }
+  }
+}
+
+async function saveTask(value: ScheduleFormValue): Promise<void> {
+  const editingId = dialog.value.editingId
+  try {
+    const payload = {
+      date: today,
+      time: value.time,
+      title: value.title,
+      description: value.description,
+      color: value.color
+    }
+    if (editingId) await planStore.updateSchedule(editingId, payload)
+    else await planStore.addSchedule({ ...payload, done: false })
+    toast.success('已保存')
+    dialog.value.visible = false
+  } catch (err) {
+    toast.error((err as Error).message)
+  }
+}
+
+/* ------------------------------ 置顶与拖拽排序 ------------------------------ */
+
+/** 切换日程「固定到顶部」（置顶项在未完成组最前） */
+async function togglePin(item: Schedule): Promise<void> {
+  try {
+    await planStore.updateSchedule(item.id, { pinned: !item.pinned })
+  } catch (err) {
+    toast.error((err as Error).message)
+  }
+}
+
+/** 拖拽状态：仅「未设置时间」的日程可拖动（dragId 为拖拽源，dropTarget 为插入目标与前后位置） */
+const dragId = ref(0)
+const dropTarget = ref<{ id: number; after: boolean } | null>(null)
+
+/** 仅未设置时间的日程可作为拖拽源（设置时间的条目按时间自动排序） */
+function canDrag(item: Schedule): boolean {
+  return !item.time
+}
+
+/** 仅未设置时间的日程可作为落点 */
+function canDropOn(item: Schedule): boolean {
+  return !item.time
+}
+
+function dragClass(id: number): Record<string, boolean> {
+  return {
+    dragging: dragId.value === id,
+    'drop-before': dropTarget.value?.id === id && dropTarget.value.after === false,
+    'drop-after': dropTarget.value?.id === id && dropTarget.value.after === true
+  }
+}
+
+function onDragStart(item: Schedule, event: DragEvent): void {
+  dragId.value = item.id
+  dropTarget.value = null
+  if (event.dataTransfer) {
+    event.dataTransfer.setData('text/plain', String(item.id))
+    event.dataTransfer.effectAllowed = 'move'
+  }
+}
+
+function onDragOver(item: Schedule, event: DragEvent): void {
+  if (!dragId.value || !canDropOn(item) || item.id === dragId.value) return
+  event.preventDefault()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+  const el = event.currentTarget as HTMLElement
+  const after = event.offsetY > el.offsetHeight / 2
+  if (dropTarget.value?.id === item.id && dropTarget.value.after === after) return
+  dropTarget.value = { id: item.id, after }
+}
+
+async function onDrop(item: Schedule): Promise<void> {
+  const from = dragId.value
+  const target = dropTarget.value
+  cleanupDrag()
+  if (!from || !target || target.id !== item.id) return
+  // 按可视顺序重编号「未设置时间」的日程（设置时间的条目按时间排序，不参与手动顺序）
+  const nextList = moveSchedule(daySchedules.value, from, target.id, target.after)
+  const ids = nextList.filter((one) => !one.time).map((one) => one.id)
+  try {
+    await planStore.reorderSchedules(ids)
+  } catch (err) {
+    toast.error((err as Error).message)
+  }
+}
+
+function cleanupDrag(): void {
+  dragId.value = 0
+  dropTarget.value = null
+}
+
+/* ------------------------------ 删除确认 ------------------------------ */
+
+const confirmState = ref<{
+  visible: boolean
+  message: string
+  action: (() => Promise<void>) | null
+}>({ visible: false, message: '', action: null })
+
+function askRemove(message: string, action: () => Promise<void>): void {
+  confirmState.value = { visible: true, message, action }
+}
+
+async function runConfirm(): Promise<void> {
+  const action = confirmState.value.action
+  confirmState.value = { visible: false, message: '', action: null }
+  if (!action) return
+  try {
+    await action()
+    toast.success('已删除')
+  } catch (err) {
+    toast.error((err as Error).message)
+  }
+}
+
+/* ------------------------------ 快捷入口 ------------------------------ */
 
 const QUICK_LINKS = [
-  { path: '/plan', title: '每日计划', desc: '安排今天的时间块', icon: 'calendar' },
+  { path: '/calendar', title: '日历', desc: '看板与心情回看', icon: 'calendar' },
   { path: '/assets', title: '资产', desc: '账户与攒钱进度', icon: 'wallet' }
 ]
 
@@ -130,9 +294,6 @@ const quickLinks = computed(() =>
   })
 )
 
-/** 「每日计划」功能是否已添加（决定日程/待办的跳转入口） */
-const planEnabled = computed(() => sidebarStore.isEnabled('plan'))
-
 /** 「资产」功能是否已添加（决定资产概览卡片显示） */
 const assetsEnabled = computed(() => sidebarStore.isEnabled('assets'))
 
@@ -140,6 +301,8 @@ const assetsEnabled = computed(() => sidebarStore.isEnabled('assets'))
 function assetText(value: number): string {
   return showAssets.value ? `¥${formatMoney(value)}` : '¥****'
 }
+
+/* ------------------------------ 生日提醒 ------------------------------ */
 
 /** 未来 60 天内即将到来的生日（含今天），按临近程度排序 */
 const upcomingBirthdays = computed(() =>
@@ -149,22 +312,6 @@ const upcomingBirthdays = computed(() =>
     .sort((a, b) => a.daysUntil - b.daysUntil)
     .slice(0, 4)
 )
-
-async function toggleSchedule(id: number, done: boolean): Promise<void> {
-  try {
-    await planStore.toggleSchedule(id, done)
-  } catch (err) {
-    toast.error((err as Error).message)
-  }
-}
-
-async function toggleTodo(id: number, done: boolean): Promise<void> {
-  try {
-    await planStore.toggleTodo(id, done)
-  } catch (err) {
-    toast.error((err as Error).message)
-  }
-}
 </script>
 
 <template>
@@ -204,14 +351,14 @@ async function toggleTodo(id: number, done: boolean): Promise<void> {
       </div>
     </section>
 
-    <!-- 统计卡片（点击跳转到每日计划查看对应详情） -->
+    <!-- 统计卡片（点击跳转到日历查看统计看板） -->
     <section class="stat-row">
       <RouterLink
         v-for="card in statCards"
         :key="card.label"
         class="stat-link"
-        to="/plan"
-        :title="`查看${card.label}详情`"
+        to="/calendar"
+        :title="`查看日历中的${card.label}详情`"
       >
         <StatCard
           :icon="card.icon"
@@ -226,75 +373,100 @@ async function toggleTodo(id: number, done: boolean): Promise<void> {
     <!-- 双栏 -->
     <section class="home-grid">
       <div class="home-col">
-        <!-- 今日日程速览 -->
+        <!-- 今日日程：清单 + 增删改 / 置顶 / 拖拽排序 -->
         <div class="card">
           <div class="card-header">
             <span class="card-title"><Icon name="clock" :size="15" />今日日程</span>
-            <RouterLink v-if="planEnabled" class="card-action" to="/plan">
-              查看全部<Icon name="chevronRight" :size="12" />
-            </RouterLink>
+            <span class="card-sub">{{ pendingCount }} 项待完成 · 共 {{ daySchedules.length }} 项</span>
+            <button class="card-action" @click="openCreate">
+              <Icon name="plus" :size="12" />添加
+            </button>
           </div>
-          <div v-if="topSchedules.length === 0" class="empty">
-            <Icon name="clock" :size="24" />
-            <span>今天还没有安排日程</span>
+
+          <div v-if="daySchedules.length === 0" class="empty">
+            <Icon name="list" :size="26" />
+            <span>今天还没有日程，点击右上角「添加」新建日程</span>
           </div>
+
           <div v-else class="row-list">
-            <div v-for="item in topSchedules" :key="item.id" class="row">
-              <span class="row-time">{{ item.time }}</span>
+            <div
+              v-for="item in daySchedules"
+              :key="item.id"
+              class="row task-row"
+              :class="[{ done: item.done }, dragClass(item.id)]"
+              :style="item.color ? { boxShadow: `inset 3px 0 0 ${item.color}` } : undefined"
+              draggable="false"
+              @dragover="onDragOver(item, $event)"
+              @drop.prevent="onDrop(item)"
+            >
+              <button
+                v-if="canDrag(item)"
+                class="drag-grip"
+                draggable="true"
+                title="拖动调整顺序"
+                :aria-label="`拖动调整「${item.title}」的顺序`"
+                @dragstart="onDragStart(item, $event)"
+                @dragend="cleanupDrag"
+                @click.prevent.stop
+              >
+                <Icon name="grip" :size="12" />
+              </button>
+              <button
+                class="round-check"
+                :class="{ checked: item.done }"
+                :title="item.done ? '标记未完成' : '标记完成'"
+                @click="toggleTask(item)"
+              >
+                <Icon name="check" :size="11" />
+              </button>
+              <span class="row-time" :class="{ 'all-day': !item.time }">
+                {{ item.time || '全天' }}
+              </span>
               <div class="row-main">
-                <span class="row-title" :class="{ strike: item.done }">{{ item.title }}</span>
+                <span class="row-title">{{ item.title }}</span>
                 <span v-if="item.description" class="row-desc">{{ item.description }}</span>
               </div>
               <button
-                class="round-check"
-                :class="{ checked: item.done }"
-                @click="toggleSchedule(item.id, !item.done)"
+                class="icon-btn pin-btn"
+                :class="{ active: item.pinned }"
+                :title="item.pinned ? '取消固定' : '固定到顶部'"
+                @click="togglePin(item)"
               >
-                <Icon name="check" :size="11" />
+                <Icon name="pin" :size="13" />
               </button>
-            </div>
-          </div>
-        </div>
-
-        <!-- 今日待办速览 -->
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title"><Icon name="list" :size="15" />今日待办</span>
-            <span class="card-sub">剩余 {{ planStore.todoLeft }} 项</span>
-            <RouterLink v-if="planEnabled" class="card-action" to="/plan">
-              查看全部<Icon name="chevronRight" :size="12" />
-            </RouterLink>
-          </div>
-          <div v-if="topTodos.length === 0" class="empty">
-            <Icon name="list" :size="24" />
-            <span>暂无待办事项</span>
-          </div>
-          <div v-else class="row-list">
-            <div v-for="item in topTodos" :key="item.id" class="row compact">
-              <button
-                class="round-check"
-                :class="{ checked: item.done }"
-                @click="toggleTodo(item.id, !item.done)"
-              >
-                <Icon name="check" :size="11" />
-              </button>
-              <span class="row-title" :class="{ strike: item.done }">{{ item.title }}</span>
+              <div class="row-actions">
+                <button class="icon-btn" title="编辑" @click="openEdit(item)">
+                  <Icon name="edit" :size="13" />
+                </button>
+                <button class="icon-btn danger" title="删除" @click="removeTask(item)">
+                  <Icon name="trash" :size="13" />
+                </button>
+              </div>
             </div>
           </div>
         </div>
       </div>
 
       <div class="home-col">
-        <!-- 心情打卡（一键记录，显示打卡状态与连续天数） -->
+        <!-- 习惯打卡（显著位置：点击圆环快速打卡） -->
+        <HabitPanel />
+
+        <!-- 心情打卡（紧凑版：悬停预览 + 点击打卡，标题旁心情图标随打卡变化） -->
         <div class="card">
           <div class="card-header">
-            <span class="card-title"><Icon name="sun" :size="15" />心情打卡</span>
+            <span class="card-title">
+              <Icon name="sun" :size="15" />心情打卡
+              <Transition name="mood-swap" mode="out-in">
+                <span v-if="todayMood !== null" :key="todayMood" class="mood-live">
+                  {{ moodEmoji(todayMood) }}
+                </span>
+              </Transition>
+            </span>
             <span class="card-sub">
               {{ todayMood === null ? '今天还没打卡' : `已打卡 · 连续打卡 ${moodStreakDays} 天` }}
             </span>
           </div>
           <MoodPicker :model-value="todayMood" @update:model-value="setMood" />
-          <p class="mood-tip">每天点一下打卡记录心情，可在日历中回看与补记</p>
         </div>
 
         <!-- 资产概览（已添加「资产」功能时显示，金额默认隐藏） -->
@@ -325,7 +497,7 @@ async function toggleTodo(id: number, done: boolean): Promise<void> {
               本月支出 -{{ assetText(assetsSummary?.monthExpense ?? 0) }}
             </span>
           </div>
-          <p class="mood-tip">金额为手动记账口径，点击眼睛图标可显示或隐藏</p>
+          <p class="card-tip">金额为手动记账口径，点击眼睛图标可显示或隐藏</p>
         </div>
 
         <!-- 生日提醒（未来 60 天内有生日时显示） -->
@@ -352,81 +524,27 @@ async function toggleTodo(id: number, done: boolean): Promise<void> {
             </div>
           </div>
         </div>
-
-        <!-- 近 7 天趋势 -->
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title"><Icon name="chart" :size="15" />近 7 天完成趋势</span>
-            <span class="card-sub">深色为已完成</span>
-          </div>
-          <MiniBarChart :points="trendPoints" :height="150" />
-        </div>
-
-        <!-- 下一步行动 -->
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title"><Icon name="target" :size="15" />下一步行动</span>
-          </div>
-          <div v-if="planStore.nextTask" class="next-hint">
-            <span class="next-badge">即将开始</span>
-            <span class="next-name">{{ planStore.nextTask.time }} · {{ planStore.nextTask.title }}</span>
-            <RouterLink v-if="planEnabled" to="/plan" class="btn btn-primary btn-sm">
-              <Icon name="play" :size="12" />去开始
-            </RouterLink>
-          </div>
-          <div v-else class="empty">
-            <Icon name="check" :size="24" />
-            <span>今日计划已全部完成</span>
-          </div>
-        </div>
       </div>
     </section>
+
+    <!-- 弹窗：日程编辑 / 删除确认 -->
+    <ScheduleEditDialog
+      :visible="dialog.visible"
+      :initial="dialog.initial"
+      :is-edit="dialog.editingId !== null"
+      @close="dialog.visible = false"
+      @save="saveTask"
+    />
+    <ConfirmDialog
+      :visible="confirmState.visible"
+      :message="confirmState.message"
+      @close="confirmState.visible = false"
+      @confirm="runConfirm"
+    />
   </div>
 </template>
 
 <style scoped>
-.page {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.page-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.head-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.head-icon {
-  width: 34px;
-  height: 34px;
-  border-radius: 11px;
-  background: linear-gradient(135deg, var(--green-500), var(--green-600));
-  color: #fff;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 4px 10px var(--brand-shadow);
-}
-
-.head-text h1 {
-  font-size: 16px;
-  font-weight: 800;
-}
-
-.head-text p {
-  font-size: 11.5px;
-  color: var(--text-3);
-  margin-top: 1px;
-}
-
 .date-chip {
   display: inline-flex;
   align-items: center;
@@ -453,11 +571,48 @@ async function toggleTodo(id: number, done: boolean): Promise<void> {
   color: var(--green-600);
 }
 
-/* --------------------------- 心情打卡与生日提醒 --------------------------- */
-.mood-tip {
+/* --------------------------- 心情打卡与资产提示 --------------------------- */
+.card-tip {
   margin-top: 10px;
   font-size: 11px;
   color: var(--text-3);
+}
+
+/* 标题旁的心情图标：打卡后随心情切换（弹出 + 微旋转动画） */
+.mood-live {
+  display: inline-block;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.mood-swap-enter-active {
+  animation: mood-live-pop 0.34s var(--ease-std);
+}
+
+.mood-swap-leave-active {
+  transition: opacity 0.14s, transform 0.14s;
+}
+
+.mood-swap-enter-from {
+  opacity: 0;
+  transform: scale(0.4) rotate(-16deg);
+}
+
+.mood-swap-leave-to {
+  opacity: 0;
+  transform: scale(1.3) rotate(12deg);
+}
+
+@keyframes mood-live-pop {
+  0% {
+    transform: scale(0.42) rotate(-14deg);
+  }
+  60% {
+    transform: scale(1.28) rotate(6deg);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
 }
 
 /* ------------------------------ 资产概览 ------------------------------ */
@@ -660,7 +815,7 @@ async function toggleTodo(id: number, done: boolean): Promise<void> {
   gap: 12px;
 }
 
-/* 统计卡片作为整体可点击（跳转到每日计划） */
+/* 统计卡片作为整体可点击（跳转到日历统计看板） */
 .stat-link {
   display: flex;
   border-radius: 14px;
@@ -700,6 +855,7 @@ async function toggleTodo(id: number, done: boolean): Promise<void> {
   min-width: 0;
 }
 
+/* ------------------------------- 列表行 ------------------------------- */
 .row-list {
   display: flex;
   flex-direction: column;
@@ -721,12 +877,123 @@ async function toggleTodo(id: number, done: boolean): Promise<void> {
   padding: 6px 2px;
 }
 
+/* 完成状态：渐变背景淡出 + 删除线渐进 */
+.task-row {
+  position: relative;
+  padding-left: 18px;
+  border-radius: 10px;
+  transition:
+    background var(--dur-2) var(--ease-std),
+    transform var(--dur-2) var(--ease-std);
+}
+
+.task-row.done {
+  background: linear-gradient(90deg, var(--green-50), transparent 74%);
+}
+
+/* 拖拽排序反馈：源项半透明，目标项顶部/底部显示插入指示线 */
+.task-row.dragging {
+  opacity: 0.45;
+}
+
+.task-row.drop-before::before,
+.task-row.drop-after::after {
+  content: '';
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--green-500);
+  box-shadow: 0 0 6px var(--brand-ring);
+}
+
+.task-row.drop-before::before {
+  top: -1px;
+}
+
+.task-row.drop-after::after {
+  bottom: -1px;
+}
+
+/* 悬停时出现的拖拽手柄（仅未设置时间的日程可拖动） */
+.drag-grip {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 18px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  user-select: none;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.task-row:hover .drag-grip {
+  opacity: 1;
+}
+
+.drag-grip:hover {
+  color: var(--green-600);
+}
+
+.drag-grip:active {
+  cursor: grabbing;
+}
+
+/* 置顶图钉：常显半透明，置顶时高亮 */
+.pin-btn {
+  opacity: 0.5;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.pin-btn:hover {
+  opacity: 1;
+  color: var(--green-600);
+}
+
+.pin-btn.active {
+  opacity: 1;
+  color: var(--green-600);
+}
+
+.round-check.checked {
+  animation: check-pop var(--dur-2) var(--ease-std);
+}
+
+@keyframes check-pop {
+  0% {
+    transform: scale(0.72);
+  }
+  60% {
+    transform: scale(1.12);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
 .row-time {
-  width: 42px;
+  width: 44px;
   flex: none;
   font-size: 12.5px;
   font-weight: 800;
   color: var(--green-600);
+  font-variant-numeric: tabular-nums;
+}
+
+.row-time.all-day {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-3);
 }
 
 .row-main {
@@ -734,14 +1001,42 @@ async function toggleTodo(id: number, done: boolean): Promise<void> {
   min-width: 0;
   display: flex;
   flex-direction: column;
+  gap: 1px;
 }
 
 .row-title {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
   font-size: 12.8px;
   font-weight: 700;
+  color: var(--text-1);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  transition: color var(--dur-2) var(--ease-std);
+}
+
+/* 删除线渐进：伪元素从左向右展开 */
+.row-title::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 56%;
+  height: 1px;
+  background: currentColor;
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform var(--dur-3) var(--ease-std);
+}
+
+.task-row.done .row-title {
+  color: var(--text-3);
+}
+
+.task-row.done .row-title::after {
+  transform: scaleX(1);
 }
 
 .row-desc {
@@ -752,33 +1047,16 @@ async function toggleTodo(id: number, done: boolean): Promise<void> {
   text-overflow: ellipsis;
 }
 
-.row-title.strike {
-  text-decoration: line-through;
-  color: var(--text-3);
-}
-
-.next-hint {
+.row-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
 }
 
-.next-badge {
-  padding: 2px 9px;
-  border-radius: 999px;
-  background: var(--yellow-soft);
-  color: var(--yellow-ink);
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.next-name {
-  flex: 1;
-  font-size: 12.8px;
-  font-weight: 700;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.row:hover .row-actions {
+  opacity: 1;
 }
 
 @media (max-width: 1240px) {

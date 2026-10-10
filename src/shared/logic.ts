@@ -2,6 +2,7 @@
  * 共享纯函数逻辑：日期处理、进度计算、状态推导等。
  * 不依赖 Electron / Node API，可在渲染进程与单元测试中直接使用。
  */
+import type { Schedule } from './types'
 
 const WEEK_LABELS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 
@@ -77,25 +78,6 @@ export function statusLabel(progress: number, hasItems = true): string {
   return '开始行动'
 }
 
-/** 从日程列表中挑选「下一个任务」：当日未完成且时间最接近当前时刻的一条 */
-export function nextTaskOf<T extends { time: string; done: boolean }>(
-  schedules: T[],
-  now: Date = new Date()
-): T | null {
-  const pending = schedules.filter((s) => !s.done)
-  if (pending.length === 0) return null
-  const nowMinutes = now.getHours() * 60 + now.getMinutes()
-  const withMinutes = pending.map((s) => ({ item: s, minutes: timeToMinutes(s.time) }))
-  const upcoming = withMinutes.filter((x) => x.minutes >= nowMinutes)
-  if (upcoming.length > 0) {
-    upcoming.sort((a, b) => a.minutes - b.minutes)
-    return upcoming[0].item
-  }
-  // 今日时间已全部过去时，返回最早的一条未完成任务
-  withMinutes.sort((a, b) => a.minutes - b.minutes)
-  return withMinutes[0].item
-}
-
 /** `HH:mm` → 分钟数；非法输入返回 0 */
 export function timeToMinutes(time: string): number {
   const m = /^(\d{1,2}):(\d{2})$/.exec(time ?? '')
@@ -145,4 +127,69 @@ export function recentDates(today: string, n: number): string[] {
     list.push(addDays(today, -i))
   }
   return list
+}
+
+/* --------------------------- 当日日程清单排序 --------------------------- */
+
+/**
+ * 当日日程展示顺序：未完成在前 → 置顶优先 → 时间升序（无时间排最后）→ 手动 sortOrder → id。
+ * 设置时间的条目按时间自动排序；未设置时间的条目按 sortOrder 反映拖拽调整的手动顺序。
+ */
+export function sortDaySchedules(schedules: Schedule[]): Schedule[] {
+  return [...schedules].sort((a, b) => {
+    if (a.done !== b.done) return a.done ? 1 : -1
+    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1
+    const aMinutes = a.time ? timeToMinutes(a.time) : Number.MAX_SAFE_INTEGER
+    const bMinutes = b.time ? timeToMinutes(b.time) : Number.MAX_SAFE_INTEGER
+    if (aMinutes !== bMinutes) return aMinutes - bMinutes
+    if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder
+    return a.id - b.id
+  })
+}
+
+/**
+ * 拖拽落位计算：把 fromId 项移动到 targetId 项之前 / 之后，返回新数组。
+ * 无效输入（id 不存在、拖动自身）返回原顺序的副本。
+ */
+export function moveSchedule(
+  list: Schedule[],
+  fromId: number,
+  targetId: number,
+  after: boolean
+): Schedule[] {
+  const next = [...list]
+  if (fromId === targetId) return next
+  const fromIndex = next.findIndex((item) => item.id === fromId)
+  if (fromIndex < 0) return next
+  const [moved] = next.splice(fromIndex, 1)
+  const targetIndex = next.findIndex((item) => item.id === targetId)
+  if (targetIndex < 0) return [...list]
+  next.splice(targetIndex + (after ? 1 : 0), 0, moved)
+  return next
+}
+
+/** 解析 `YYYY-MM-DD HH:MM:SS` 本地时间字符串为毫秒时间戳；非法输入返回 null */
+export function parseLocalDateTime(value: string): number | null {
+  if (!value) return null
+  const ms = Date.parse(value.replace(' ', 'T'))
+  return Number.isNaN(ms) ? null : ms
+}
+
+/**
+ * 平均完成耗时（分钟）：completed_at − created_at。
+ * 仅统计两者均可解析且完成时刻不早于创建时刻的样本；无有效样本返回 null。
+ */
+export function averageCompletionMinutes(
+  items: Array<{ createdAt: string; completedAt: string }>
+): number | null {
+  const durations: number[] = []
+  items.forEach((item) => {
+    const start = parseLocalDateTime(item.createdAt)
+    const end = parseLocalDateTime(item.completedAt)
+    if (start === null || end === null || end < start) return
+    durations.push((end - start) / 60000)
+  })
+  if (durations.length === 0) return null
+  const total = durations.reduce((sum, value) => sum + value, 0)
+  return Math.round(total / durations.length)
 }

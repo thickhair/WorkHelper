@@ -1,13 +1,14 @@
 <script setup lang="ts">
 /**
  * 左侧导航栏：Logo + 导航入口，当前路由高亮。
- * 首页 / 每日计划 / 日历 / 功能广场为固定项（始终显示、不可移除），
- * 其余功能由「功能广场」配置，悬停显示移除按钮。
+ * 首页 / 每日计划 / 日历 / 功能广场为固定项（始终显示、不可移除、不可移动），
+ * 其余功能由「功能广场」配置：悬停显示拖拽手柄（调整顺序）与移除按钮。
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSidebarStore } from '../stores/sidebar'
 import { useToastStore } from '../stores/toast'
+import type { FeatureDef } from '@shared/features'
 import Icon from './Icon.vue'
 
 const route = useRoute()
@@ -15,11 +16,62 @@ const router = useRouter()
 const sidebar = useSidebarStore()
 const toast = useToastStore()
 
-/** 侧边栏条目（顺序由功能目录决定，固定功能始终显示） */
+/** 侧边栏条目（固定项置顶、可配置功能按用户配置顺序居中、功能广场收尾） */
 const items = computed(() => sidebar.items)
+
+/** 拖拽排序状态：仅可配置功能参与（dragId 为拖拽源，dropTarget 为插入目标与前后位置） */
+const dragId = ref('')
+const dropTarget = ref<{ id: string; after: boolean } | null>(null)
 
 function isActive(path: string): boolean {
   return route.path === path
+}
+
+/** 拖拽相关 class：源项半透明，目标项显示插入指示线 */
+function dragClass(id: string): Record<string, boolean> {
+  return {
+    dragging: dragId.value === id,
+    'drop-before': dropTarget.value?.id === id && dropTarget.value.after === false,
+    'drop-after': dropTarget.value?.id === id && dropTarget.value.after === true
+  }
+}
+
+function onDragStart(item: FeatureDef, event: DragEvent): void {
+  if (item.fixed) return
+  dragId.value = item.id
+  dropTarget.value = null
+  if (event.dataTransfer) {
+    event.dataTransfer.setData('text/plain', item.id)
+    event.dataTransfer.effectAllowed = 'move'
+  }
+}
+
+/** 仅其它可配置项可作为落点；按光标在目标项上半/下半决定插入前/后 */
+function onDragOver(item: FeatureDef, event: DragEvent): void {
+  if (!dragId.value || item.fixed || item.id === dragId.value) return
+  event.preventDefault()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+  const el = event.currentTarget as HTMLElement
+  const after = event.offsetY > el.offsetHeight / 2
+  if (dropTarget.value?.id === item.id && dropTarget.value.after === after) return
+  dropTarget.value = { id: item.id, after }
+}
+
+async function onDrop(item: FeatureDef): Promise<void> {
+  const from = dragId.value
+  const target = dropTarget.value
+  cleanupDrag()
+  if (!from || !target || target.id !== item.id) return
+  try {
+    await sidebar.move(from, target.id, target.after)
+  } catch (err) {
+    toast.error((err as Error).message)
+  }
+}
+
+function cleanupDrag(): void {
+  dragId.value = ''
+  dropTarget.value = null
 }
 
 /** 从侧边栏移除功能（仅可配置功能；可从「功能广场」重新添加） */
@@ -46,17 +98,32 @@ async function removeItem(id: string, name: string, path: string): Promise<void>
       </div>
     </div>
 
-    <nav class="sidebar-menu">
+    <nav class="sidebar-menu" :class="{ dragging: dragId }" @dragend="cleanupDrag">
       <RouterLink
         v-for="item in items"
         :key="item.id"
         :to="item.route"
         class="menu-item"
-        :class="{ active: isActive(item.route) }"
+        :class="[{ active: isActive(item.route) }, dragClass(item.id)]"
         :title="item.name"
+        draggable="false"
+        @dragover="onDragOver(item, $event)"
+        @drop.prevent="onDrop(item)"
       >
         <Icon :name="item.icon" :size="15" />
         <span class="menu-title">{{ item.name }}</span>
+        <button
+          v-if="!item.fixed"
+          class="drag-grip"
+          draggable="true"
+          title="拖动调整顺序"
+          :aria-label="`拖动调整「${item.name}」在侧边栏中的顺序`"
+          @dragstart="onDragStart(item, $event)"
+          @dragend="cleanupDrag"
+          @click.prevent.stop
+        >
+          <Icon name="grip" :size="12" />
+        </button>
         <button
           v-if="!item.fixed"
           class="remove-btn"
@@ -101,6 +168,7 @@ async function removeItem(id: string, name: string, path: string): Promise<void>
   height: 28px;
   border-radius: 9px;
   background: rgba(255, 255, 255, 0.22);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -142,6 +210,7 @@ async function removeItem(id: string, name: string, path: string): Promise<void>
 }
 
 .menu-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -150,8 +219,11 @@ async function removeItem(id: string, name: string, path: string): Promise<void>
   border-radius: 999px;
   color: rgba(255, 255, 255, 0.86);
   font-size: 12.5px;
+  letter-spacing: 0.2px;
   text-decoration: none;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background var(--dur-1) var(--ease-std),
+    color var(--dur-1) var(--ease-std);
   flex: none;
 }
 
@@ -166,16 +238,83 @@ async function removeItem(id: string, name: string, path: string): Promise<void>
   color: #fff;
 }
 
+/* 品牌绿底上键盘焦点用白色焦点环 */
+.menu-item:focus-visible {
+  outline-color: rgba(255, 255, 255, 0.85);
+}
+
 .menu-item.active {
   background: rgba(255, 255, 255, 0.26);
   color: #fff;
   font-weight: 700;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.12),
+    0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+/* 拖拽排序反馈：源项半透明，目标项顶部/底部显示插入指示线 */
+.menu-item.dragging {
+  opacity: 0.45;
+}
+
+.sidebar-menu.dragging {
+  cursor: grabbing;
+}
+
+.menu-item.drop-before::before,
+.menu-item.drop-after::after {
+  content: '';
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  height: 2px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.55);
+}
+
+.menu-item.drop-before::before {
+  top: -2px;
+}
+
+.menu-item.drop-after::after {
+  bottom: -2px;
+}
+
+/* 悬停时出现的拖拽手柄（仅可配置功能；拖动调整侧边栏顺序） */
+.drag-grip {
+  margin-left: auto;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.75);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  user-select: none;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+}
+
+.menu-item:hover .drag-grip {
+  opacity: 1;
+}
+
+.drag-grip:hover {
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+}
+
+.drag-grip:active {
+  cursor: grabbing;
 }
 
 /* 悬停时出现的移除按钮 */
 .remove-btn {
-  margin-left: auto;
   width: 18px;
   height: 18px;
   flex: none;
@@ -221,6 +360,7 @@ async function removeItem(id: string, name: string, path: string): Promise<void>
 
   .logo-text,
   .menu-title,
+  .drag-grip,
   .remove-btn,
   .foot-text {
     display: none;

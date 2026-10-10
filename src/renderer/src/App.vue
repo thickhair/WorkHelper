@@ -139,12 +139,19 @@ function closeWindow(): void {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background var(--dur-1) var(--ease-std),
+    color var(--dur-1) var(--ease-std),
+    transform var(--dur-1) var(--ease-std);
 }
 
 .win-btn:hover {
   background: var(--hover-tint);
   color: var(--text-1);
+}
+
+.win-btn:active {
+  transform: scale(0.92);
 }
 
 .win-btn.close:hover {
@@ -167,6 +174,13 @@ function closeWindow(): void {
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 0 22px 22px;
+  padding: 0 24px 24px;
+}
+
+/* 窄窗口：缩小内容区边距，提升空间利用 */
+@media (max-width: 640px) {
+  .app-content {
+    padding: 0 12px 12px;
+  }
 }
 </style>

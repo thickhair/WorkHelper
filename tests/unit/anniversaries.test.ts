@@ -110,11 +110,39 @@ describe('发生日期与剩余天数', () => {
 })
 
 describe('资产平台与金额格式化', () => {
-  it('平台目录覆盖主流支付与银行，未知 key 回退「其他平台」', () => {
+  it('平台目录覆盖主流支付平台与 15 家银行，未知 key 回退「其他平台」', () => {
     const keys = ASSET_PLATFORMS.map((p) => p.key)
-    for (const key of ['alipay', 'wechat', 'jd', 'icbc', 'ccb', 'abc', 'boc', 'cmb', 'cash']) {
+    for (const key of [
+      'alipay',
+      'wechat',
+      'jd',
+      'unionpay',
+      'meituan',
+      'douyin',
+      'icbc',
+      'ccb',
+      'abc',
+      'boc',
+      'cmb',
+      'bocom',
+      'psbc',
+      'citic',
+      'spdb',
+      'cmbc',
+      'ceb',
+      'cib',
+      'pab',
+      'hxb',
+      'cgb',
+      'cash'
+    ]) {
       expect(keys).toContain(key)
     }
+    // 平台数量（含现金与其他平台共 23 项），且银行共 15 家
+    expect(ASSET_PLATFORMS.length).toBeGreaterThanOrEqual(20)
+    expect(ASSET_PLATFORMS.filter((p) => p.name.endsWith('银行'))).toHaveLength(15)
+    // 回退平台必须位于最后一位
+    expect(ASSET_PLATFORMS[ASSET_PLATFORMS.length - 1].key).toBe('other')
     expect(platformOf('alipay').name).toBe('支付宝')
     expect(platformOf('not-exist').key).toBe('other')
     // 每个平台都有品牌色与徽章字形

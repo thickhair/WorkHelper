@@ -2,7 +2,7 @@
  * 路由配置：使用 Hash 模式（兼容打包后 file:// 加载）。
  */
 import { createRouter, createWebHashHistory, RouteRecordRaw } from 'vue-router'
-import { featureByRoute } from '@shared/features'
+import { featureByPath } from '@shared/features'
 import { useSidebarStore } from '../stores/sidebar'
 
 const routes: RouteRecordRaw[] = [
@@ -11,12 +11,6 @@ const routes: RouteRecordRaw[] = [
     name: 'home',
     component: () => import('../views/HomeView.vue'),
     meta: { title: '首页', icon: 'home' }
-  },
-  {
-    path: '/plan',
-    name: 'plan',
-    component: () => import('../views/DailyPlanView.vue'),
-    meta: { title: '每日计划', icon: 'calendar' }
   },
   {
     path: '/calendar',
@@ -29,6 +23,18 @@ const routes: RouteRecordRaw[] = [
     name: 'assets',
     component: () => import('../views/AssetsView.vue'),
     meta: { title: '资产', icon: 'wallet' }
+  },
+  {
+    path: '/reader',
+    name: 'reader',
+    component: () => import('../views/ReaderLibraryView.vue'),
+    meta: { title: '阅读', icon: 'books' }
+  },
+  {
+    path: '/reader/book/:id',
+    name: 'reader-book',
+    component: () => import('../views/ReaderView.vue'),
+    meta: { title: '阅读', icon: 'books' }
   },
   {
     path: '/plaza',
@@ -50,9 +56,9 @@ const router = createRouter({
   routes
 })
 
-// 固定功能（首页 / 每日计划 / 日历 / 功能广场）始终可访问（isEnabled 恒为 true），
-// 「设置」不在功能目录中，经右上角入口访问（featureByRoute 返回 undefined 直接放行），
-// 已从侧边栏移除的可配置功能不可直接访问，统一跳转到侧边栏中的第一个功能（首页）
+// 固定功能（首页 / 日历 / 功能广场）始终可访问（isEnabled 恒为 true），
+// 「设置」不在功能目录中，经右上角入口访问（featureByPath 返回 undefined 直接放行），
+// 已从侧边栏移除的可配置功能不可直接访问（含其子路径，如阅读页），统一跳转到侧边栏中的第一个功能（首页）
 router.beforeEach(async (to) => {
   const sidebar = useSidebarStore()
   if (!sidebar.ready) {
@@ -62,7 +68,7 @@ router.beforeEach(async (to) => {
       return true
     }
   }
-  const feature = featureByRoute(to.path)
+  const feature = featureByPath(to.path)
   if (!feature || sidebar.isEnabled(feature.id)) return true
   const fallback = sidebar.items[0]?.route ?? '/'
   if (fallback === to.path) return true

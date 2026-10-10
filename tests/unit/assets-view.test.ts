@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 /**
- * 资产页面冒烟测试：以接近验证库的数据挂载，捕捉渲染期运行时错误。
+ * 资产页面冒烟测试：以接近验证库的数据挂载，捕捉渲染期运行时错误；
+ * 并验证添加账户弹窗的平台选择网格（23 个平台、真实 logo 图形与字形回退）。
  */
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { ASSET_PLATFORMS, platformOf } from '@shared/assets'
 import AssetsView from '../../src/renderer/src/views/AssetsView.vue'
 
 const accounts = [
@@ -16,8 +18,8 @@ const accounts = [
 ]
 
 const records = [
-  { id: 1, accountId: 3, kind: 'income', category: '工资', amount: 15000, date: '2026-10-01', note: '', createdAt: '', accountName: '工商储蓄卡' },
-  { id: 2, accountId: 1, kind: 'expense', category: '餐饮', amount: 45.5, date: '2026-10-09', note: '午餐', createdAt: '', accountName: '支付宝' }
+  { id: 1, accountId: 3, kind: 'income', category: '工资', amount: 15000, date: '2026-10-01', note: '', createdAt: '', accountName: '工商储蓄卡', platform: 'icbc' },
+  { id: 2, accountId: 1, kind: 'expense', category: '餐饮', amount: 45.5, date: '2026-10-09', note: '午餐', createdAt: '', accountName: '支付宝', platform: 'alipay' }
 ]
 
 const goals = [
@@ -76,5 +78,36 @@ describe('资产页面', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('12,340.50')
     expect(wrapper.text()).toContain('67,820.50')
+  })
+
+  it('添加账户弹窗列出全部平台，主流平台使用真实 logo 图形、其余回退字形', async () => {
+    const wrapper = mount(AssetsView, { global: { plugins: [router] } })
+    await flushPromises()
+
+    const addBtn = wrapper.findAll('button').find((btn) => btn.text().includes('添加账户'))
+    expect(addBtn).toBeTruthy()
+    await addBtn!.trigger('click')
+    await flushPromises()
+
+    const btns = Array.from(document.querySelectorAll('.platform-btn'))
+    expect(btns).toHaveLength(ASSET_PLATFORMS.length)
+    expect(ASSET_PLATFORMS.length).toBeGreaterThanOrEqual(20)
+
+    // 已收录真实 logo 图形的平台渲染矢量图形（微信 / 京东 / 云闪付 / 抖音）
+    for (const key of ['wechat', 'jd', 'unionpay', 'douyin']) {
+      const btn = btns.find((el) => el.textContent?.includes(platformOf(key).name))
+      expect(btn).toBeTruthy()
+      const svg = btn!.querySelector('.platform-logo')
+      expect(svg).toBeTruthy()
+      expect((svg as SVGElement).innerHTML.length).toBeGreaterThan(0)
+    }
+
+    // 银行与支付宝等平台回退为品牌色徽章 + 字形（与真实品牌识别一致）
+    for (const key of ['icbc', 'alipay']) {
+      const btn = btns.find((el) => el.textContent?.includes(platformOf(key).name))
+      expect(btn!.querySelector('.platform-logo')).toBeNull()
+    }
+
+    wrapper.unmount()
   })
 })

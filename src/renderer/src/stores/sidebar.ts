@@ -1,6 +1,7 @@
 /**
- * 侧边栏状态：固定功能（首页 / 每日计划 / 日历 / 功能广场）始终显示，
- * 可配置功能由「功能广场」自由增删，配置持久化到本地设置。
+ * 侧边栏状态：固定功能（首页 / 日历 / 功能广场）始终显示，
+ * 可配置功能由「功能广场」自由增删，并可在侧边栏中拖拽调整先后顺序，
+ * 配置（含顺序）持久化到本地设置。
  */
 import { defineStore } from 'pinia'
 import {
@@ -9,20 +10,28 @@ import {
   DEFAULT_SIDEBAR,
   FIXED_FEATURES,
   normalizeSidebar,
+  reorderSidebar,
   type FeatureDef
 } from '@shared/features'
 
+/** 侧边栏收尾功能：固定排在最后（可配置功能从功能广场添加后显示在其上方） */
+const TAIL_FEATURE_ID = 'plaza'
+
 export const useSidebarStore = defineStore('sidebar', {
   state: () => ({
-    /** 已添加到侧边栏的可配置功能 id（默认无，固定功能不写入配置） */
+    /** 已添加到侧边栏的可配置功能 id（按侧边栏显示顺序；固定功能不写入配置） */
     enabled: [...DEFAULT_SIDEBAR] as string[],
     ready: false
   }),
   getters: {
-    /** 侧边栏条目：固定功能置顶，其后为已添加的可配置功能 */
+    /** 侧边栏条目：首页 / 日历置顶，可配置功能按用户配置顺序居中，功能广场收尾 */
     items(): FeatureDef[] {
-      const extra = CONFIGURABLE_FEATURES.filter((f) => this.enabled.includes(f.id))
-      return [...FIXED_FEATURES, ...extra]
+      const head = FIXED_FEATURES.filter((f) => f.id !== TAIL_FEATURE_ID)
+      const tail = FIXED_FEATURES.filter((f) => f.id === TAIL_FEATURE_ID)
+      const extra = this.enabled
+        .map((id) => CONFIGURABLE_FEATURES.find((f) => f.id === id))
+        .filter((f): f is FeatureDef => Boolean(f))
+      return [...head, ...extra, ...tail]
     }
   },
   actions: {
@@ -55,6 +64,23 @@ export const useSidebarStore = defineStore('sidebar', {
     /** 恢复默认配置（清空可配置功能，仅保留固定功能） */
     async restoreDefaults(): Promise<void> {
       await this.persist([...DEFAULT_SIDEBAR])
+    },
+
+    /**
+     * 拖拽排序：把功能移到目标功能之前 / 之后（仅可配置功能；顺序即侧边栏显示顺序）。
+     * 目标无效或原地移动时不触发持久化。
+     */
+    async move(fromId: string, targetId: string, after: boolean): Promise<void> {
+      if (
+        fromId === targetId ||
+        !this.enabled.includes(fromId) ||
+        !this.enabled.includes(targetId)
+      ) {
+        return
+      }
+      const next = reorderSidebar(this.enabled, fromId, targetId, after)
+      if (next.every((id, index) => id === this.enabled[index])) return
+      await this.persist(next)
     },
 
     /** 保存到本地设置，并以主进程返回的规范化结果为准 */

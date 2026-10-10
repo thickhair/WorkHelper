@@ -29,6 +29,13 @@ export function getDbPath(): string {
   return join(getDataDir(), 'workbench.db')
 }
 
+/** 书籍文件目录（数据目录下的 books/ 子目录；随数据存储位置一并迁移） */
+export function getBooksDir(): string {
+  const dir = join(getDataDir(), 'books')
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+  return dir
+}
+
 /** 获取数据库单例（首次调用时完成迁移与种子写入） */
 export function getDb(): SqliteDatabase {
   if (instance) return instance
@@ -278,6 +285,70 @@ CREATE TABLE IF NOT EXISTS saving_deposits (
 CREATE INDEX IF NOT EXISTS idx_saving_deposits_goal ON saving_deposits(goal_id);
 `
 
+/**
+ * V5 版本变更：为三类任务（日程 / 待办 / 重要事项）增加 completed_at 完成时刻字段，
+ * 勾选完成时写入本地时间、取消完成时清空，用于「平均完成耗时」统计。
+ */
+const SCHEMA_V5 = `
+ALTER TABLE schedules ADD COLUMN completed_at TEXT;
+ALTER TABLE todos ADD COLUMN completed_at TEXT;
+ALTER TABLE priorities ADD COLUMN completed_at TEXT;
+`
+
+/**
+ * V6 版本变更：为日程增加 color 颜色标记（空串表示不标记）与 pinned 固定到顶部标记。
+ * 采用「可空 + 默认值」而非 NOT NULL：旧版 JSON 备份导入时缺失列会写入 NULL，
+ * 读取侧统一用 `?? ''` / `?? 0` 兜底（与导入的既有兼容策略一致）。
+ */
+const SCHEMA_V6 = `
+ALTER TABLE schedules ADD COLUMN color TEXT DEFAULT '';
+ALTER TABLE schedules ADD COLUMN pinned INTEGER DEFAULT 0;
+`
+
+/**
+ * V7 版本新增「阅读」模块表：书籍（books）与书签（bookmarks）。
+ * 书籍文件复制到数据目录 books/ 子目录（file_name 为存储文件名），
+ * 封面以 dataURL 形式存入 cover（渲染层压缩为最长边 400px 的 JPEG，控制体积）；
+ * location 保存阅读位置：EPUB 为 CFI、PDF 为页码、TXT / Markdown 为百分比。
+ */
+const SCHEMA_V7 = `
+CREATE TABLE IF NOT EXISTS books (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  title        TEXT    NOT NULL,
+  author       TEXT    NOT NULL DEFAULT '',
+  format       TEXT    NOT NULL,
+  file_name    TEXT    NOT NULL,
+  file_size    INTEGER NOT NULL DEFAULT 0,
+  cover        TEXT    NOT NULL DEFAULT '',
+  location     TEXT    NOT NULL DEFAULT '',
+  progress     REAL    NOT NULL DEFAULT 0,
+  last_read_at TEXT    NOT NULL DEFAULT '',
+  created_at   TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS bookmarks (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  book_id    INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+  location   TEXT    NOT NULL,
+  label      TEXT    NOT NULL DEFAULT '',
+  percent    REAL    NOT NULL DEFAULT 0,
+  created_at TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_bookmarks_book ON bookmarks(book_id);
+`
+
+/**
+ * 一次性数据修复：将历史打卡次数收敛到每日目标以内（与 checkIn 上限口径一致）。
+ * 旧版本上限为 target * 3，曾产生 3/1、4/2 等超目标数据；此处按新口径（上限 target）钳制。
+ */
+export function clampHabitLogs(db: SqliteDatabase): void {
+  db.exec(
+    `UPDATE habit_logs
+     SET count = (SELECT h.target FROM habits h WHERE h.id = habit_logs.habit_id)
+     WHERE count > (SELECT h.target FROM habits h WHERE h.id = habit_logs.habit_id)`
+  )
+}
+
 /** 版本迁移（基于 PRAGMA user_version） */
 function migrate(db: SqliteDatabase): void {
   const row = db.prepare('PRAGMA user_version').get() as { user_version?: number } | undefined
@@ -297,6 +368,19 @@ function migrate(db: SqliteDatabase): void {
   if (version < 4) {
     db.exec(SCHEMA_V4)
     db.exec('PRAGMA user_version = 4')
+  }
+  if (version < 5) {
+    db.exec(SCHEMA_V5)
+    db.exec('PRAGMA user_version = 5')
+  }
+  if (version < 6) {
+    db.exec(SCHEMA_V6)
+    clampHabitLogs(db)
+    db.exec('PRAGMA user_version = 6')
+  }
+  if (version < 7) {
+    db.exec(SCHEMA_V7)
+    db.exec('PRAGMA user_version = 7')
   }
   seedDefaults(db)
 }

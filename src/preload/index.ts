@@ -4,6 +4,7 @@
  */
 import { contextBridge, ipcRenderer } from 'electron'
 import type { Anniversary, AnniversaryInput } from '../shared/anniversaries'
+import type { ReaderSettings } from '../shared/reader'
 import type {
   AppSettings,
   AssetAccount,
@@ -15,21 +16,21 @@ import type {
   AssetTrendPoint,
   Birthday,
   BirthdayInput,
+  Book,
+  Bookmark,
+  BookmarkInput,
+  BookMetaPatch,
   DayStats,
   Habit,
   HabitInput,
   HabitWithProgress,
   MoodRecord,
-  PriorityInput,
-  PriorityTask,
   SavingDeposit,
   SavingGoalInput,
   SavingGoalWithProgress,
   Schedule,
   ScheduleInput,
   StorageInfo,
-  Todo,
-  TodoInput,
   TrendPoint
 } from '../shared/types'
 import type { WeatherResult } from '../shared/weather'
@@ -52,6 +53,7 @@ const api = {
     toggleMaximize: (): Promise<boolean> => invoke('window:toggle-maximize'),
     close: (): Promise<void> => invoke('window:close'),
     isMaximized: (): Promise<boolean> => invoke('window:is-maximized'),
+    setFullScreen: (flag: boolean): Promise<boolean> => invoke('window:set-fullscreen', flag),
     onMaximizeChange: (callback: (maximized: boolean) => void): void => {
       ipcRenderer.removeAllListeners('window:maximized-changed')
       ipcRenderer.on('window:maximized-changed', (_event, maximized: boolean) => callback(maximized))
@@ -81,28 +83,9 @@ const api = {
     update: (id: number, patch: Partial<ScheduleInput>): Promise<Schedule> =>
       invoke('schedules:update', id, patch),
     toggle: (id: number, done: boolean): Promise<Schedule> => invoke('schedules:toggle', id, done),
-    remove: (id: number): Promise<void> => invoke('schedules:remove', id)
-  },
-
-  /** 待办 */
-  todos: {
-    list: (date: string): Promise<Todo[]> => invoke('todos:list', date),
-    create: (input: TodoInput): Promise<Todo> => invoke('todos:create', input),
-    update: (id: number, patch: Partial<TodoInput>): Promise<Todo> =>
-      invoke('todos:update', id, patch),
-    toggle: (id: number, done: boolean): Promise<Todo> => invoke('todos:toggle', id, done),
-    remove: (id: number): Promise<void> => invoke('todos:remove', id)
-  },
-
-  /** 重要事项 */
-  priorities: {
-    list: (date: string): Promise<PriorityTask[]> => invoke('priorities:list', date),
-    create: (input: PriorityInput): Promise<PriorityTask> => invoke('priorities:create', input),
-    update: (id: number, patch: Partial<PriorityInput>): Promise<PriorityTask> =>
-      invoke('priorities:update', id, patch),
-    toggle: (id: number, done: boolean): Promise<PriorityTask> =>
-      invoke('priorities:toggle', id, done),
-    remove: (id: number): Promise<void> => invoke('priorities:remove', id)
+    remove: (id: number): Promise<void> => invoke('schedules:remove', id),
+    /** 拖拽排序：按给定顺序重编号「未设置时间」的日程 */
+    reorder: (ids: number[]): Promise<void> => invoke('schedules:reorder', ids)
   },
 
   /** 习惯打卡 */
@@ -186,6 +169,36 @@ const api = {
   /** 天气（自动定位 + 未来一周预报，主进程缓存） */
   weather: {
     report: (force?: boolean): Promise<WeatherResult> => invoke('weather:report', force ?? false)
+  },
+
+  /** 阅读：书库（导入 / 移除 / 进度 / 元数据 / 内容读取） */
+  books: {
+    list: (): Promise<Book[]> => invoke('books:list'),
+    get: (id: number): Promise<Book | null> => invoke('books:get', id),
+    import: (): Promise<Book[]> => invoke('books:import'),
+    remove: (id: number): Promise<void> => invoke('books:remove', id),
+    updateProgress: (id: number, location: string, progress: number): Promise<Book> =>
+      invoke('books:update-progress', id, location, progress),
+    updateMeta: (id: number, patch: BookMetaPatch): Promise<Book> =>
+      invoke('books:update-meta', id, patch),
+    /** 书籍原始内容（EPUB / PDF 渲染引擎加载用） */
+    file: (id: number): Promise<ArrayBuffer> => invoke('books:file', id),
+    /** 纯文本内容（TXT / Markdown） */
+    text: (id: number): Promise<string> => invoke('books:text', id)
+  },
+
+  /** 阅读：书签 */
+  bookmarks: {
+    list: (bookId: number): Promise<Bookmark[]> => invoke('bookmarks:list', bookId),
+    create: (input: BookmarkInput): Promise<Bookmark> => invoke('bookmarks:create', input),
+    remove: (id: number): Promise<void> => invoke('bookmarks:remove', id)
+  },
+
+  /** 阅读：阅读设置（字体 / 字号 / 行距 / 页边距 / 配色主题） */
+  reader: {
+    settings: (): Promise<ReaderSettings> => invoke('reader:settings'),
+    setSettings: (value: ReaderSettings): Promise<ReaderSettings> =>
+      invoke('reader:set-settings', value)
   }
 }
 

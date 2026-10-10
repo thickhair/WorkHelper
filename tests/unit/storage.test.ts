@@ -20,19 +20,17 @@ vi.mock('electron', () => ({
 }))
 
 import { dialog } from 'electron'
-import { closeDb, getDb, getDbPath, setDataDirOverride } from '../../src/main/db/database'
+import { closeDb, clampHabitLogs, getDb, getDbPath, setDataDirOverride } from '../../src/main/db/database'
 import { anniversaryService } from '../../src/main/services/anniversary.service'
 import { assetService } from '../../src/main/services/asset.service'
+import { bookService, bookmarkService } from '../../src/main/services/book.service'
 import { habitService } from '../../src/main/services/habit.service'
 import { moodService } from '../../src/main/services/mood.service'
 import { savingsService } from '../../src/main/services/savings.service'
+import { settingsService } from '../../src/main/services/settings.service'
 import { statsService } from '../../src/main/services/stats.service'
 import { storageService } from '../../src/main/services/storage.service'
-import {
-  priorityService,
-  scheduleService,
-  todoService
-} from '../../src/main/services/task.service'
+import { scheduleService } from '../../src/main/services/task.service'
 
 const DATE = '2026-08-15'
 
@@ -69,6 +67,9 @@ describe('数据库初始化', () => {
     expect(tables).toContain('asset_records')
     expect(tables).toContain('saving_goals')
     expect(tables).toContain('saving_deposits')
+    // V7 迁移：新增阅读模块 books / bookmarks 表
+    expect(tables).toContain('books')
+    expect(tables).toContain('bookmarks')
     // V4 迁移：13 项功能相关表已删除
     expect(tables).not.toContain('modules')
     expect(tables).not.toContain('module_records')
@@ -78,7 +79,21 @@ describe('数据库初始化', () => {
 
     expect(habitService.list(DATE)).toHaveLength(5)
     const version = db.prepare('PRAGMA user_version').get() as { user_version: number }
-    expect(version.user_version).toBe(4)
+    expect(version.user_version).toBe(7)
+
+    // V5 迁移：三类任务表新增 completed_at 完成时刻字段
+    const columnsOf = (table: string): string[] =>
+      db
+        .prepare(`PRAGMA table_info(${table})`)
+        .all()
+        .map((row) => String(row.name))
+    expect(columnsOf('schedules')).toContain('completed_at')
+    expect(columnsOf('todos')).toContain('completed_at')
+    expect(columnsOf('priorities')).toContain('completed_at')
+
+    // V6 迁移：日程表新增 color / pinned 列
+    expect(columnsOf('schedules')).toContain('color')
+    expect(columnsOf('schedules')).toContain('pinned')
   })
 
   it('重复初始化幂等，不会重复写入种子数据', () => {
@@ -102,6 +117,11 @@ describe('日程服务', () => {
 
     scheduleService.toggle(target.id, true)
     expect(scheduleService.get(target.id)?.done).toBe(true)
+    // V5：勾选完成时写入 completed_at，取消完成时清空
+    expect(scheduleService.get(target.id)?.completedAt).not.toBe('')
+    scheduleService.toggle(target.id, false)
+    expect(scheduleService.get(target.id)?.completedAt).toBe('')
+    scheduleService.toggle(target.id, true)
 
     scheduleService.remove(target.id)
     list = scheduleService.list(DATE)
@@ -114,49 +134,114 @@ describe('日程服务', () => {
     expect(scheduleService.list(DATE)).toHaveLength(1)
     expect(scheduleService.list('2026-08-16')).toHaveLength(1)
   })
-})
 
-describe('待办与重要事项服务', () => {
-  it('待办支持时间段与完成状态', () => {
-    const todo = todoService.create({
+  it('支持颜色标记与置顶：置顶最前、未设置时间排最后', () => {
+    const colored = scheduleService.create({
       date: DATE,
-      title: '背单词',
-      startTime: '08:00',
-      endTime: '09:00',
+      time: '10:00',
+      title: '彩色日程',
+      description: '',
+      color: '#e86a5e',
       done: false
     })
-    expect(todo.startTime).toBe('08:00')
-    todoService.toggle(todo.id, true)
-    expect(todoService.list(DATE)[0].done).toBe(true)
-    todoService.remove(todo.id)
-    expect(todoService.list(DATE)).toHaveLength(0)
+    const untimed = scheduleService.create({
+      date: DATE,
+      time: '',
+      title: '全天日程',
+      description: '',
+      done: false
+    })
+    const pinned = scheduleService.create({
+      date: DATE,
+      time: '08:00',
+      title: '置顶日程',
+      description: '',
+      pinned: true,
+      done: false
+    })
+
+    // 顺序：置顶最前 → 有时间按时间升序 → 未设置时间最后
+    expect(scheduleService.list(DATE).map((item) => item.title)).toEqual([
+      '置顶日程',
+      '彩色日程',
+      '全天日程'
+    ])
+    expect(scheduleService.get(colored.id)?.color).toBe('#e86a5e')
+    expect(scheduleService.get(colored.id)?.pinned).toBe(false)
+    expect(scheduleService.get(pinned.id)?.pinned).toBe(true)
+
+    // 更新：取消颜色、为全天日程置顶（未完成组内按时间排序，全天在最后）
+    const updated = scheduleService.update(untimed.id, { pinned: true })
+    expect(updated?.pinned).toBe(true)
+    expect(scheduleService.list(DATE).map((item) => item.title)).toEqual([
+      '置顶日程',
+      '全天日程',
+      '彩色日程'
+    ])
   })
 
-  it('重要事项保存优先级', () => {
-    priorityService.create({
+  it('日程手动排序：按给定顺序重编号 sort_order 并持久化', () => {
+    const first = scheduleService.create({
       date: DATE,
-      title: '发布视频',
-      startTime: '16:00',
-      endTime: '16:30',
-      priority: 'high',
+      time: '',
+      title: '日程 A',
+      description: '',
       done: false
     })
-    expect(priorityService.list(DATE)[0].priority).toBe('high')
+    const second = scheduleService.create({
+      date: DATE,
+      time: '',
+      title: '日程 B',
+      description: '',
+      done: false
+    })
+
+    scheduleService.reorder([second.id, first.id])
+    expect(scheduleService.get(second.id)?.sortOrder).toBe(0)
+    expect(scheduleService.get(first.id)?.sortOrder).toBe(1)
+    // 列表展示顺序同步（未设置时间的条目按 sortOrder 排列）
+    expect(scheduleService.list(DATE).map((item) => item.title)).toEqual(['日程 B', '日程 A'])
   })
 })
 
 describe('习惯打卡服务', () => {
-  it('打卡次数按目标范围限制，可撤销', () => {
-    const habit = habitService.list(DATE)[0]
-    expect(habit.count).toBe(0)
+  it('打卡次数不超过每日目标，可撤销', () => {
+    const single = habitService.list(DATE).find((h) => h.target === 1)!
+    const double = habitService.list(DATE).find((h) => h.target === 2)!
 
-    const afterFirst = habitService.checkIn(habit.id, DATE, 1)
-    expect(afterFirst?.count).toBe(1)
+    expect(habitService.checkIn(single.id, DATE, 1)?.count).toBe(1)
+    // 达到每日目标后继续打卡不再增长（修复旧版本 target*3 上限导致的 3/1 超目标问题）
+    expect(habitService.checkIn(single.id, DATE, 1)?.count).toBe(1)
+
+    expect(habitService.checkIn(double.id, DATE, 1)?.count).toBe(1)
+    expect(habitService.checkIn(double.id, DATE, 1)?.count).toBe(2)
+    expect(habitService.checkIn(double.id, DATE, 1)?.count).toBe(2)
 
     // 撤销到 0 后不会出现负数
-    const afterUndo = habitService.checkIn(habit.id, DATE, -1)
-    expect(afterUndo?.count).toBe(0)
-    expect(habitService.checkIn(habit.id, DATE, -1)?.count).toBe(0)
+    expect(habitService.checkIn(single.id, DATE, -1)?.count).toBe(0)
+    expect(habitService.checkIn(single.id, DATE, -1)?.count).toBe(0)
+  })
+
+  it('下调目标次数会收敛该习惯的历史打卡记录', () => {
+    const created = habitService.create({ name: '喝水', icon: '💧', target: 3 })
+    habitService.checkIn(created.id, DATE, 1)
+    habitService.checkIn(created.id, DATE, 1)
+    habitService.checkIn(created.id, DATE, 1)
+    expect(habitService.list(DATE).find((h) => h.id === created.id)?.count).toBe(3)
+
+    habitService.update(created.id, { target: 1 })
+    expect(habitService.list(DATE).find((h) => h.id === created.id)?.count).toBe(1)
+
+    habitService.remove(created.id)
+  })
+
+  it('clampHabitLogs 收敛历史超目标脏数据', () => {
+    const habit = habitService.list(DATE).find((h) => h.target === 1)!
+    getDb()
+      .prepare('INSERT OR REPLACE INTO habit_logs (habit_id, date, count) VALUES (?, ?, ?)')
+      .run(habit.id, DATE, 3)
+    clampHabitLogs(getDb())
+    expect(habitService.list(DATE).find((h) => h.id === habit.id)?.count).toBe(1)
   })
 
   it('统计达标习惯数量与总数', () => {
@@ -191,23 +276,22 @@ describe('习惯打卡服务', () => {
 })
 
 describe('统计服务', () => {
-  it('单日统计汇总任务与习惯进度', () => {
+  it('单日统计汇总日程与习惯进度', () => {
     scheduleService.create({ date: DATE, time: '07:00', title: 'A', description: '', done: true })
     scheduleService.create({ date: DATE, time: '08:00', title: 'B', description: '', done: false })
-    todoService.create({ date: DATE, title: 'C', startTime: '', endTime: '', done: true })
 
     const habits = habitService.list(DATE)
     habitService.checkIn(habits[0].id, DATE, 1)
     habitService.checkIn(habits[1].id, DATE, 1)
 
     const stats = statsService.day(DATE)
-    expect(stats.taskDone).toBe(2)
-    expect(stats.taskTotal).toBe(3)
+    expect(stats.taskDone).toBe(1)
+    expect(stats.taskTotal).toBe(2)
     expect(stats.habitDone).toBe(2)
     expect(stats.habitTotal).toBe(5)
-    // (2 + 2) / (3 + 5) = 50%
-    expect(stats.progress).toBe(50)
-    expect(stats.statusLabel).toBe('保持专注')
+    // (1 + 2) / (2 + 5) = 42.86 → 43%
+    expect(stats.progress).toBe(43)
+    expect(stats.statusLabel).toBe('继续加油')
   })
 
   it('近 7 天趋势返回 7 个数据点且含今日', () => {
@@ -502,6 +586,171 @@ describe('数据存储位置服务', () => {
     expect(storageService.info().custom).toBe(false)
     expect(storageService.info().dataPath).toBe(join(tempRoot, 'data', 'workbench.db'))
 
+    rmSync(target, { recursive: true, force: true })
+  })
+})
+
+describe('阅读模块（书库 / 书签 / 阅读设置）', () => {
+  const sourceTxt = join(tempRoot, 'sample-book.txt')
+
+  beforeEach(() => {
+    writeFileSync(sourceTxt, '第一段\n第二段', 'utf8')
+  })
+
+  it('导入书籍：复制文件到数据目录并写入记录，默认以文件名命名', () => {
+    const book = bookService.importFile(sourceTxt)
+    expect(book.format).toBe('txt')
+    expect(book.title).toBe('sample-book')
+    expect(book.progress).toBe(0)
+    expect(book.lastReadAt).toBe('')
+    expect(book.cover).toBe('')
+    expect(existsSync(join(tempRoot, 'data', 'books', book.fileName))).toBe(true)
+    expect(bookService.list()).toHaveLength(1)
+  })
+
+  it('导入对话框：取消返回空数组，全部文件不支持时抛出友好错误', async () => {
+    ;(dialog.showOpenDialog as Mock).mockResolvedValueOnce({ canceled: true, filePaths: [] })
+    expect(await bookService.import(null)).toEqual([])
+
+    ;(dialog.showOpenDialog as Mock).mockResolvedValueOnce({
+      canceled: false,
+      filePaths: [sourceTxt]
+    })
+    const imported = await bookService.import(null)
+    expect(imported).toHaveLength(1)
+    expect(imported[0].title).toBe('sample-book')
+
+    const bad = join(tempRoot, 'bad.bin')
+    writeFileSync(bad, 'x')
+    ;(dialog.showOpenDialog as Mock).mockResolvedValueOnce({ canceled: false, filePaths: [bad] })
+    await expect(bookService.import(null)).rejects.toThrow('所选文件均无法导入')
+  })
+
+  it('不支持的扩展名与空文件导入抛出错误', () => {
+    const bad = join(tempRoot, 'bad.bin')
+    writeFileSync(bad, 'x')
+    expect(() => bookService.importFile(bad)).toThrow('不支持的书籍格式')
+
+    const empty = join(tempRoot, 'empty.txt')
+    writeFileSync(empty, '')
+    expect(() => bookService.importFile(empty)).toThrow('文件内容为空')
+  })
+
+  it('文本解码：优先 UTF-8，非 UTF-8 回退 GBK', () => {
+    const utf8 = bookService.importFile(sourceTxt)
+    expect(bookService.text(utf8.id)).toBe('第一段\n第二段')
+
+    const gbkPath = join(tempRoot, 'gbk-book.txt')
+    // 「你好」的 GBK 字节序列，非法 UTF-8：应回退 GBK 解码
+    writeFileSync(gbkPath, Buffer.from([0xc4, 0xe3, 0xba, 0xc3]))
+    const gbk = bookService.importFile(gbkPath)
+    expect(bookService.text(gbk.id)).toBe('你好')
+  })
+
+  it('读取失败给出友好错误：不存在的书籍、非文本格式与缺失的文件', () => {
+    const book = bookService.importFile(sourceTxt)
+    const buffer = bookService.file(book.id)
+    expect(new TextDecoder().decode(buffer)).toBe('第一段\n第二段')
+
+    expect(() => bookService.text(999)).toThrow('书籍不存在')
+
+    // PDF 等非文本格式不允许按文本读取
+    const pdfPath = join(tempRoot, 'fake.pdf')
+    writeFileSync(pdfPath, '%PDF-1.4 占位')
+    const pdf = bookService.importFile(pdfPath)
+    expect(() => bookService.text(pdf.id)).toThrow('该格式不支持文本读取')
+
+    rmSync(join(tempRoot, 'data', 'books', book.fileName))
+    expect(() => bookService.file(book.id)).toThrow('书籍文件不存在')
+  })
+
+  it('进度、元数据与移除：更新进度记录最近阅读时间，移除后级联清理文件与书签', () => {
+    const book = bookService.importFile(sourceTxt)
+    const updated = bookService.updateProgress(book.id, '42', 42)
+    expect(updated?.progress).toBe(42)
+    expect(updated?.location).toBe('42')
+    expect(updated?.lastReadAt).not.toBe('')
+    // 已读的书籍排在未读之前，未读按导入时间倒序
+    const second = bookService.importFile(sourceTxt)
+    expect(bookService.list().map((item) => item.id)).toEqual([book.id, second.id])
+    bookService.updateProgress(second.id, '10', 10)
+    expect(bookService.list()[0].id).toBe(second.id)
+
+    const meta = bookService.updateMeta(book.id, {
+      title: ' 新书名 ',
+      author: '测试作者',
+      cover: 'data:image/jpeg;base64,xxx'
+    })
+    expect(meta?.title).toBe('新书名')
+    expect(meta?.author).toBe('测试作者')
+    expect(meta?.cover).toBe('data:image/jpeg;base64,xxx')
+    // 未提供的字段保留原值
+    expect(bookService.updateMeta(book.id, {})?.author).toBe('测试作者')
+
+    const filePath = join(tempRoot, 'data', 'books', book.fileName)
+    bookmarkService.create({ bookId: book.id, location: '42', label: '位置', percent: 42 })
+    bookService.remove(book.id)
+    expect(bookService.get(book.id)).toBeNull()
+    expect(existsSync(filePath)).toBe(false)
+    expect(bookmarkService.list(book.id)).toHaveLength(0)
+  })
+
+  it('书签：按位置百分比排序，支持创建与删除，删除书籍时一并清理', () => {
+    const book = bookService.importFile(sourceTxt)
+    bookmarkService.create({ bookId: book.id, location: '50', label: '后段', percent: 50 })
+    bookmarkService.create({ bookId: book.id, location: '10', label: '', percent: 10 })
+    const list = bookmarkService.list(book.id)
+    expect(list.map((item) => item.percent)).toEqual([10, 50])
+    expect(list[1].label).toBe('后段')
+    // 越界百分比自动钳制
+    const clamped = bookmarkService.create({
+      bookId: book.id,
+      location: '120',
+      label: '越界',
+      percent: 120
+    })
+    expect(clamped.percent).toBe(100)
+
+    bookmarkService.remove(list[0].id)
+    expect(bookmarkService.list(book.id)).toHaveLength(2)
+    expect(() =>
+      bookmarkService.create({ bookId: 999, location: '1', label: '', percent: 1 })
+    ).toThrow('书籍不存在')
+  })
+
+  it('阅读设置：默认值、非法值回退与越界钳制，并可持久化读取', () => {
+    const defaults = settingsService.getReaderSettings()
+    expect(defaults.fontSize).toBe(18)
+    expect(defaults.theme).toBe('auto')
+    expect(defaults.fontId).toBe('system')
+
+    const saved = settingsService.setReaderSettings({
+      fontId: 'song',
+      fontSize: 99,
+      lineHeight: 0.2,
+      margin: 500,
+      theme: 'sepia'
+    })
+    expect(saved.fontId).toBe('song')
+    expect(saved.fontSize).toBe(30)
+    expect(saved.lineHeight).toBe(1.4)
+    expect(saved.margin).toBe(96)
+    expect(saved.theme).toBe('sepia')
+    expect(settingsService.getReaderSettings()).toEqual(saved)
+  })
+
+  it('更改数据存储位置时书籍文件一并迁移', async () => {
+    const book = bookService.importFile(sourceTxt)
+    const target = mkdtempSync(join(tmpdir(), 'workbench-reader-store-'))
+    ;(dialog.showOpenDialog as Mock).mockResolvedValue({ canceled: false, filePaths: [target] })
+
+    const newPath = await storageService.change(null)
+    expect(newPath).toBe(join(target, 'Workbench', 'workbench.db'))
+    expect(existsSync(join(target, 'Workbench', 'books', book.fileName))).toBe(true)
+    // 新位置数据库可正常读取书库数据
+    expect(bookService.get(book.id)?.title).toBe('sample-book')
+
+    closeDb()
     rmSync(target, { recursive: true, force: true })
   })
 })
