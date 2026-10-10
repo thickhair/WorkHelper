@@ -5,7 +5,7 @@
  * [名称, 路由 hash] 或 [名称, 路由 hash, 截图前执行的脚本]，如打开阅读面板）。
  */
 import { app, BrowserWindow } from 'electron'
-import { existsSync, mkdirSync, writeFileSync } from 'fs'
+import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'fs'
 import { join } from 'path'
 
 /** 需要截图的页面：名称 → 路由 hash */
@@ -47,6 +47,16 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+/** 截图前脚本返回值序列化（供 capture-log.txt 记录断言证据，失败时降级为字符串） */
+function stringifyResult(value: unknown): string {
+  if (value === undefined) return ''
+  try {
+    return typeof value === 'string' ? value : JSON.stringify(value)
+  } catch {
+    return String(value)
+  }
+}
+
 /** 阅读页就绪等待：轮询至加载遮罩消失且阅读内容（文本流 / iframe / PDF 画布）已渲染 */
 async function waitReaderReady(win: BrowserWindow): Promise<void> {
   for (let i = 0; i < 30; i++) {
@@ -72,6 +82,9 @@ export function setupDevCapture(win: BrowserWindow): void {
 
   // 关闭后台节流，保证被遮挡时动画与渲染正常推进（仅调试截图时启用）
   win.webContents.setBackgroundThrottling(false)
+  // 断言证据文件：记录每页「名称 / 路由 / 截图前脚本返回值」，供验证报告引用
+  const logFile = join(dir, 'capture-log.txt')
+  writeFileSync(logFile, '')
 
   win.webContents.on('did-finish-load', () => {
     void (async () => {
@@ -93,14 +106,17 @@ export function setupDevCapture(win: BrowserWindow): void {
           } else {
             await delay(2600)
           }
+          let scriptResult: unknown
           if (preScript) {
             try {
-              await win.webContents.executeJavaScript(preScript)
+              scriptResult = await win.webContents.executeJavaScript(preScript)
               await delay(800)
             } catch (err) {
+              scriptResult = `ERROR: ${String(err)}`
               console.error(`[capture] ${name} 截图前脚本执行失败：`, err)
             }
           }
+          appendFileSync(logFile, `${name}\t${hash}\t${stringifyResult(scriptResult)}\n`)
           const image = await win.webContents.capturePage()
           writeFileSync(join(dir, `${name}.png`), image.toPNG())
           console.log(`[capture] 已保存 ${name}.png`)
